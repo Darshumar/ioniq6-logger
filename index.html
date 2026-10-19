@@ -1,0 +1,550 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0e1216">
+<title>Ioniq 6 Logger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Handy-Logger fuer den Vgate-Adapter: verbindet per Web Bluetooth, fragt dieselben
+   Werte ab wie das ESP32-Display und speichert sie im gleichen CSV-Format. */
+:root {
+  --bg: #f4f6f8; --surface: #ffffff; --fg: #141a21; --muted: #5a6572; --line: #dfe4ea;
+  --accent: #1f6fd1; --good: #12805c; --bad: #c2410c; --regen: #1baf7a;
+  --font-display: "Saira", "Arial Narrow", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #0e1216; --surface: #161b21; --fg: #e7ebef; --muted: #98a2ad; --line: #283039;
+    --accent: #5b9cf0; --good: #3fbf8f; --bad: #f08a4b; --regen: #3fbf8f; color-scheme: dark; }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--fg); font: 15px/1.45 var(--font-body); }
+[hidden] { display: none !important; }
+.wrap { max-width: 640px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: max(16px, env(safe-area-inset-top, 0px)) 32px; display: grid; gap: 14px; }
+h1 { font: 600 1.6rem/1.1 var(--font-display); margin: 0; }
+.state { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: .9rem; min-height: 1.4em; }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line); flex: none; }
+.dot.on { background: var(--good); }
+.dot.err { background: var(--bad); }
+.actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+button { font: 600 1rem var(--font-body); border: 1px solid var(--line); background: var(--surface); color: var(--fg); padding: 13px 14px; border-radius: 10px; cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; grid-column: 1 / -1; }
+button.stop { grid-column: 1 / -1; border-color: var(--bad); color: var(--bad); }
+button:disabled { opacity: .45; cursor: default; }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.tile { padding: 12px 14px; box-shadow: 1px 1px 0 var(--line); min-width: 0; }
+.tile .k { color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .07em; }
+.tile .v { font: 500 1.7rem/1.15 var(--font-display); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile .v small { font: 400 .8rem var(--font-body); color: var(--muted); margin-left: 3px; }
+.tile.big { grid-column: 1 / -1; }
+.tile.big .v { font-size: 2.6rem; }
+.v.regen { color: var(--regen); }
+.rec { font-family: var(--font-mono); font-size: .85rem; color: var(--muted); display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: grid; gap: 8px; }
+.panel h2 { font: 500 1rem var(--font-display); margin: 0; }
+.files { display: grid; gap: 6px; }
+.file { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: .9rem; }
+.file span { font-family: var(--font-mono); font-size: .82rem; overflow: hidden; text-overflow: ellipsis; }
+.file button { padding: 7px 10px; font-size: .85rem; font-weight: 500; }
+.note { color: var(--muted); font-size: .82rem; }
+.warn { color: var(--bad); font-size: .9rem; }
+pre { font: .75rem/1.35 var(--font-mono); color: var(--muted); max-height: 160px; overflow: auto; margin: 0; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Ioniq 6 Logger</h1>
+    <div class="state"><i class="dot" id="dot"></i><span id="state">Nicht verbunden</span></div>
+  </header>
+
+  <p class="warn" id="nobt" hidden>Dieser Browser kann kein Bluetooth. Öffne die Seite in Chrome auf Android (oder Chrome/Edge am PC).</p>
+
+  <div class="actions">
+    <button class="primary" id="connect" type="button">Adapter verbinden und loggen</button>
+    <button class="stop" id="stop" type="button" hidden>Aufzeichnung beenden</button>
+  </div>
+
+  <div class="tiles" id="tiles">
+    <div class="tile big"><div class="k">Leistung</div><div class="v" id="t_kw">–<small>kW</small></div></div>
+    <div class="tile"><div class="k">Ladestand</div><div class="v" id="t_soc">–<small>%</small></div></div>
+    <div class="tile"><div class="k">Restenergie</div><div class="v" id="t_kwh">–<small>kWh</small></div></div>
+    <div class="tile"><div class="k">Tempo</div><div class="v" id="t_speed">–<small>km/h</small></div></div>
+    <div class="tile"><div class="k">Verbrauch Fahrt</div><div class="v" id="t_cons">–<small>kWh/100</small></div></div>
+    <div class="tile"><div class="k">Akku</div><div class="v" id="t_temp">–<small>°C</small></div></div>
+    <div class="tile"><div class="k">Außen</div><div class="v" id="t_out">–<small>°C</small></div></div>
+    <div class="tile"><div class="k">Motor hinten</div><div class="v" id="t_motor">–<small>°C</small></div></div>
+    <div class="tile"><div class="k">Inverter hinten</div><div class="v" id="t_inv">–<small>°C</small></div></div>
+    <div class="tile"><div class="k">Drehzahl hinten</div><div class="v" id="t_rpm_r">–<small>1/min</small></div></div>
+    <div class="tile"><div class="k">Drehzahl vorne</div><div class="v" id="t_rpm_f">–<small>1/min</small></div></div>
+  </div>
+  <div class="rec"><span id="rec">Keine Aufzeichnung</span><span id="cycle"></span></div>
+
+  <section class="panel" id="filesPanel" hidden>
+    <h2>Aufzeichnungen auf diesem Handy</h2>
+    <div class="files" id="files"></div>
+    <p class="note">Die CSV hat dasselbe Format wie die Logs vom ESP. „Teilen“ schickt sie z. B. an Google Drive oder per Mail; die Webansicht öffnet sie direkt.</p>
+  </section>
+
+  <section class="panel">
+    <h2>So geht's</h2>
+    <p class="note">Auto einschalten, Display-ESP aus (der Adapter nimmt nur eine Verbindung an), dann „Adapter verbinden“ und „IOS-Vlink“ wählen. Der Bildschirm bleibt an, solange geloggt wird; lass die Seite im Vordergrund, sonst bremst Android die Abfragen. Die Werte werden laufend auf dem Handy gesichert, auch wenn die Seite abstürzt.</p>
+  </section>
+
+  <section class="panel">
+    <h2>Adapter-Protokoll</h2>
+    <pre id="log"></pre>
+  </section>
+</div>
+
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+const nf = (d) => new Intl.NumberFormat("de-DE", { minimumFractionDigits: d, maximumFractionDigits: d });
+const fmt = (v, d = 0) => (Number.isFinite(v) ? nf(d).format(v) : "–");
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ---------- Protokoll-Anzeige ----------
+const logLines = [];
+function log(s) {
+  logLines.push(s);
+  if (logLines.length > 60) logLines.shift();
+  $("#log").textContent = logLines.join("\n");
+}
+function setState(text, kind) {
+  $("#state").textContent = text;
+  $("#dot").className = "dot" + (kind ? " " + kind : "");
+}
+
+// ---------- ELM327 ueber Bluetooth LE ----------
+const SERVICES = ["e7810a71-73ae-499d-8c15-faa9aef0c3f2", 0x18f0, 0xfff0, 0xffe0, 0xffe1];
+const VGATE_CHAR = "bef8d6c9-9c21-4c9e-b632-bd58c1009f9f";
+
+class Elm {
+  constructor() { this.buf = ""; this.waiter = null; this.dev = null; }
+  async connect() {
+    this.dev = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: SERVICES });
+    this.dev.addEventListener("gattserverdisconnected", () => this.onDrop && this.onDrop());
+    log(`Gerät: ${this.dev.name || "ohne Namen"}`);
+    const gatt = await this.dev.gatt.connect();
+    let notify = null, write = null;
+    for (const svc of await gatt.getPrimaryServices()) {
+      let chars;
+      try { chars = await svc.getCharacteristics(); } catch { continue; }
+      const vg = chars.find((c) => c.uuid === VGATE_CHAR);
+      if (vg) { notify = write = vg; break; }
+      const n = chars.find((c) => c.properties.notify || c.properties.indicate);
+      const w = chars.find((c) => c.properties.write || c.properties.writeWithoutResponse);
+      if (n && w && !notify) { notify = n; write = w; }
+    }
+    if (!notify) throw new Error("Keine passende Schnittstelle am Adapter gefunden");
+    this.write = write;
+    notify.addEventListener("characteristicvaluechanged", (e) => {
+      this.buf += new TextDecoder().decode(e.target.value);
+      if (this.buf.includes(">") && this.waiter) this.waiter();
+    });
+    await notify.startNotifications();
+    log(`Schnittstelle ${notify.uuid.slice(0, 8)}`);
+  }
+  get connected() { return !!(this.dev && this.dev.gatt.connected); }
+  async send(cmd, timeout = 2000) {
+    this.buf = "";
+    const data = new TextEncoder().encode(cmd + "\r");
+    for (let i = 0; i < data.length; i += 20) {
+      const part = data.slice(i, i + 20);
+      if (this.write.properties.write) await this.write.writeValueWithResponse(part);
+      else await this.write.writeValueWithoutResponse(part);
+    }
+    await new Promise((res) => {
+      const t = setTimeout(() => { this.waiter = null; res(); }, timeout);
+      this.waiter = () => { clearTimeout(t); this.waiter = null; res(); };
+      if (this.buf.includes(">")) this.waiter();
+    });
+    return this.buf.replace(">", "").trim();
+  }
+  disconnect() { try { this.dev && this.dev.gatt.disconnect(); } catch {} }
+}
+
+// Setzt eine Antwort (ATH1, ATS1) aus ISO-TP-Frames zusammen, wie parse_isotp in decode.cpp
+function parseIsotp(text, rx) {
+  let out = [], expected = -1;
+  for (const line of text.split(/[\r\n]+/)) {
+    const parts = line.trim().split(/\s+/);
+    if (parts.length < 2 || parts[0].toUpperCase() !== rx) continue;
+    const raw = parts.slice(1).map((h) => (/^[0-9A-Fa-f]{1,2}$/.test(h) ? parseInt(h, 16) : NaN));
+    if (raw.some(Number.isNaN)) continue;
+    const pci = raw[0] >> 4;
+    if (pci === 0) return raw.slice(1, 1 + (raw[0] & 0x0f));
+    if (pci === 1) { expected = ((raw[0] & 0x0f) << 8) | raw[1]; out = raw.slice(2); }
+    else if (pci === 2 && expected >= 0) out.push(...raw.slice(1));
+  }
+  if (expected < 0 || out.length < expected) return null;
+  return out.slice(0, expected);
+}
+
+// ---------- Umrechnung, wie decode.cpp ----------
+const u16 = (d, i) => (d[i] << 8) | d[i + 1];
+const u16le = (d, i) => d[i] | (d[i + 1] << 8);
+const u32 = (d, i) => d[i] * 16777216 + (d[i + 1] << 16) + (d[i + 2] << 8) + d[i + 3];
+const s16 = (v) => (v & 0x8000 ? v - 0x10000 : v);
+const s8 = (v) => (v & 0x80 ? v - 0x100 : v);
+const ok = (p, a, b, min) => p && p.length >= min && p[0] === 0x62 && p[1] === a && p[2] === b;
+const REV_PER_KM = 10.65 * 1000 / 2.23;
+
+function d220101(p, r) {
+  if (!ok(p, 0x01, 0x01, 60)) return false;
+  const d = p.slice(3);
+  r.soc_bms_pct = d[4] / 2;
+  r.charge_limit_kw = u16(d, 5) / 100;
+  r.discharge_limit_kw = u16(d, 7) / 100;
+  r.bms_status_raw = d[9];
+  r.battery_current_a = s16(u16(d, 10)) / 10;
+  r.battery_voltage_v = u16(d, 12) / 10;
+  r.battery_power_kw = r.battery_voltage_v * r.battery_current_a / 1000;
+  r.battery_temp_max_c = s8(d[14]);
+  r.battery_temp_min_c = s8(d[15]);
+  for (let i = 0; i < 5; i++) r[`module_${String(i + 1).padStart(2, "0")}_c`] = s8(d[16 + i]);
+  r.cell_v_max = d[23] / 50; r.cell_v_max_no = d[24];
+  r.cell_v_min = d[25] / 50; r.cell_v_min_no = d[26];
+  r.aux_battery_v = d[29] / 10;
+  r.cum_charged_kwh = u32(d, 38) / 10;
+  r.motor1_rpm = s16(u16(d, 53));
+  r.motor2_rpm = s16(u16(d, 55));
+  r.charge_request_a = r.battery_voltage_v > 0 ? r.charge_limit_kw * 1000 / r.battery_voltage_v : 0;
+  return true;
+}
+function d220105(p, r) {
+  if (!ok(p, 0x01, 0x05, 46)) return false;
+  const d = p.slice(3);
+  r.soh_pct = u16(d, 25) / 10;
+  r.soc_display_pct = d[31] / 2;
+  r.remaining_kwh = u16(d, 28) * 2 / 1000;
+  for (let i = 0; i < 7; i++) r[`module_${String(6 + i).padStart(2, "0")}_c`] = s8(d[9 + i]);
+  for (let i = 0; i < 4; i++) r[`module_${String(13 + i).padStart(2, "0")}_c`] = s8(d[39 + i]);
+  return true;
+}
+function d220106(p, r) {
+  if (!ok(p, 0x01, 0x06, 14)) return false;
+  const d = p.slice(3);
+  r.coolant_inlet_c = s8(d[4]);
+  r.coolant_pump_raw = d[9];
+  const parked = r.motor1_rpm === 0 && r.motor2_rpm === 0;
+  const heating = parked ? r.battery_power_kw >= 3 : r.coolant_inlet_c >= r.battery_temp_max_c + 3;
+  r.battery_thermal = !d[9] ? "aus" : heating ? "Heizung an" : r.coolant_inlet_c <= r.battery_temp_min_c - 3 ? "Kühlung an" : "Pumpe läuft";
+  return true;
+}
+function d22B002(p, r) {
+  if (!ok(p, 0xb0, 0x02, 12)) return false;
+  const d = p.slice(3);
+  r.odometer_km = (d[6] << 16) | (d[7] << 8) | d[8];
+  return true;
+}
+function d22C00B(p, r) {
+  if (!ok(p, 0xc0, 0x0b, 24)) return false;
+  const d = p.slice(3);
+  ["fl", "fr", "rl", "rr"].forEach((w, i) => {
+    const raw = d[4 + 5 * i];
+    r[`tire_${w}_bar`] = raw / 5 * 0.0689476;
+    r[`tire_${w}_c`] = raw ? d[5 + 5 * i] - 50 : 0;
+  });
+  return true;
+}
+function d7E2(p, v) {
+  if (!ok(p, 0xe0, 0x04, 15)) return false;
+  const d = p.slice(3);
+  v.speed = s16(u16le(d, 10)) * 0.015625;
+  return true;
+}
+function d7E3(p, v) {
+  if (!ok(p, 0xe0, 0x01, 3 + 58)) return false;
+  const d = p.slice(3);
+  v.motor = s16(u16le(d, 25)) / 100;
+  v.inverter = s16(u16le(d, 27)) / 100;
+  return true;
+}
+function d7B3(p, v) {
+  if (!ok(p, 0x01, 0x00, 10)) return false;
+  v.outside = p[3 + 6] / 2 - 40;
+  return true;
+}
+
+// ---------- CSV wie sdlog.cpp (Firmware 31) ----------
+const MODULES = Array.from({ length: 16 }, (_, i) => `module_${String(i + 1).padStart(2, "0")}_c`);
+const COLS = ["time", "uptime_s", "soc_bms_pct", "soc_display_pct", "soh_pct", "remaining_kwh", "battery_voltage_v",
+  "battery_current_a", "battery_power_kw", "battery_temp_min_c", "battery_temp_max_c", ...MODULES,
+  "cell_v_min", "cell_v_min_no", "cell_v_max", "cell_v_max_no", "aux_battery_v", "cum_charged_kwh",
+  "charge_limit_kw", "charge_request_a", "discharge_limit_kw", "bms_status_raw", "motor1_rpm", "motor2_rpm",
+  "coolant_inlet_c", "coolant_pump_raw", "battery_thermal", "odometer_km", "trip_km", "trip_kwh", "trip_kwh_100km",
+  "last_km_kwh_100km", "tire_fl_bar", "tire_fl_c", "tire_fr_bar", "tire_fr_c", "tire_rl_bar", "tire_rl_c", "tire_rr_bar",
+  "tire_rr_c", "raw_220101", "raw_220105", "raw_220106", "raw_22C00B", "raw_7E2_22E004", "raw_7B3_220100",
+  "raw_744_22E002", "raw_744_22E004", "raw_220111", "raw_7E3_22E001"];
+const DEC = { soc_bms_pct: 1, soc_display_pct: 1, soh_pct: 1, remaining_kwh: 1, battery_voltage_v: 1, battery_current_a: 1,
+  battery_power_kw: 2, cell_v_min: 2, cell_v_max: 2, aux_battery_v: 1, cum_charged_kwh: 1, charge_limit_kw: 2,
+  charge_request_a: 1, discharge_limit_kw: 2, trip_kwh: 2, trip_kwh_100km: 1, last_km_kwh_100km: 1,
+  tire_fl_bar: 2, tire_fr_bar: 2, tire_rl_bar: 2, tire_rr_bar: 2, uptime_s: 1 };
+function csvLine(r) {
+  return COLS.map((k) => {
+    const v = r[k];
+    if (v === undefined || v === null || (typeof v === "number" && !Number.isFinite(v))) return "";
+    return typeof v === "number" ? (k in DEC ? v.toFixed(DEC[k]) : String(Math.round(v))) : String(v);
+  }).join(";");
+}
+
+// ---------- Speicher auf dem Handy (IndexedDB) ----------
+let dbp = null;
+function db() {
+  dbp ||= new Promise((res, rej) => {
+    const q = indexedDB.open("ioniq6-logger", 1);
+    q.onupgradeneeded = () => q.result.createObjectStore("logs", { keyPath: "name" });
+    q.onsuccess = () => res(q.result);
+    q.onerror = () => rej(q.error);
+  });
+  return dbp;
+}
+async function store(mode, fn) {
+  const d = await db();
+  return new Promise((res, rej) => {
+    const tx = d.transaction("logs", mode);
+    const r = fn(tx.objectStore("logs"));
+    tx.oncomplete = () => res(r && r.result);
+    tx.onerror = () => rej(tx.error);
+  });
+}
+const saveLog = (L) => store("readwrite", (s) => s.put({ name: L.name, text: L.lines.join("\n") + "\n", rows: L.lines.length - 1, saved: Date.now() }));
+const allLogs = () => store("readonly", (s) => s.getAll());
+const deleteLog = (name) => store("readwrite", (s) => s.delete(name));
+
+async function renderFiles() {
+  let list = [];
+  try { list = await allLogs(); } catch { return; }
+  list.sort((a, b) => b.name.localeCompare(a.name));
+  $("#filesPanel").hidden = !list.length;
+  const box = $("#files");
+  box.innerHTML = "";
+  for (const f of list) {
+    const row = document.createElement("div");
+    row.className = "file";
+    row.innerHTML = `<span></span><div><button type="button" data-a="share">Teilen</button> <button type="button" data-a="save">Speichern</button> <button type="button" data-a="del">Löschen</button></div>`;
+    row.querySelector("span").textContent = `${f.name} · ${f.rows} Zeilen`;
+    row.onclick = async (e) => {
+      const a = e.target.dataset && e.target.dataset.a;
+      if (!a) return;
+      const file = new File([f.text], f.name, { type: "text/csv" });
+      if (a === "share") {
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          try { await navigator.share({ files: [file], title: f.name }); } catch {}
+        } else download(file);
+      } else if (a === "save") download(file);
+      else if (a === "del") {
+        if (e.target.textContent !== "Sicher?") { e.target.textContent = "Sicher?"; return; }
+        await deleteLog(f.name); renderFiles();
+      }
+    };
+    box.appendChild(row);
+  }
+}
+function download(file) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(file);
+  a.download = file.name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+// ---------- Abfrage-Schleife, wie loop()/poll_more() in main.cpp ----------
+const elm = new Elm();
+let running = false, wakeLock = null;
+
+async function target(tx) {
+  await elm.send(`ATSH${tx}`);
+  await elm.send(`ATFCSH${tx}`);
+}
+async function query(cmd, rx, tries = 2, timeout = 4000) {
+  for (let i = 0; i < tries; i++) {
+    const a = await elm.send(cmd, timeout);
+    const p = parseIsotp(a, rx);
+    if (p) return p;
+    log(`${cmd}: ${a ? a.replace(/\s+/g, " ").slice(0, 60) : "keine Antwort"}`);
+  }
+  return null;
+}
+const hex = (p) => p.map((b) => b.toString(16).toUpperCase().padStart(2, "0")).join(" ");
+
+async function initElm() {
+  for (const c of ["ATZ", "ATE0", "ATL0", "ATS1", "ATH1"]) log(`${c}: ${(await elm.send(c, c === "ATZ" ? 5000 : 2000)).replace(/\s+/g, " ")}`);
+  const rv = await elm.send("ATRV");
+  log(`ATRV: ${rv}`);
+  const v = parseFloat(rv);
+  if (v > 0 && v < 13) log("Unter 13 V: Ist das Auto eingeschaltet?");
+  await elm.send("ATSPA6");
+  let a = await elm.send("0100", 8000);
+  if (!a.includes("41 00")) {
+    await elm.send("ATSP0");
+    a = await elm.send("0100", 15000);
+    if (!a.includes("41 00")) throw new Error("Das Auto antwortet nicht. Ist es eingeschaltet (READY)?");
+  }
+  await elm.send("ATSP6");
+  for (const c of ["ATSH7E4", "ATFCSH7E4", "ATFCSD300000", "ATFCSM1"]) await elm.send(c);
+}
+
+function stamp(d) {
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+function isoLocal(d) {
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+async function run() {
+  const t0 = performance.now();
+  const L = { name: stamp(new Date()) + ".csv", lines: [COLS.join(";")] };
+  const trip = { odo0: NaN, kwh: 0, lastT: NaN, kmOdo: NaN, kmKwh: 0, lastKm: NaN };
+  const veh = {};
+  let cycle = 0, fails = 0, savedAt = 0, statsTries = 0;
+  $("#rec").textContent = `Aufzeichnung ${L.name}`;
+  while (running) {
+    const start = performance.now();
+    cycle++;
+    const r = {};
+    const p1 = await query("220101", "7EC");
+    const p5 = p1 && d220101(p1, r) ? await query("220105", "7EC") : null;
+    if (p5 && d220105(p5, r)) {
+      fails = 0;
+      r.raw_220101 = hex(p1); r.raw_220105 = hex(p5);
+      const p6 = await query("220106", "7EC", 1, 2000);
+      if (p6 && d220106(p6, r)) r.raw_220106 = hex(p6);
+      await target("7C6");
+      const po = await query("22B002", "7CE", 1, 2000);
+      if (po) d22B002(po, r);
+      if (cycle % 5 === 1) {
+        await target("7A0");
+        const pt = await query("22C00B", "7A8", 1, 2000);
+        if (pt && d22C00B(pt, r)) r.raw_22C00B = hex(pt);
+      }
+      await target("7E2");
+      const pv = await query("22E004", "7EA", 1, 1500);
+      veh.speed = NaN;
+      if (pv && d7E2(pv, veh)) r.raw_7E2_22E004 = hex(pv);
+      if (cycle % 5 === 1) {
+        await target("7B3");
+        const pc = await query("220100", "7BB", 1, 1500);
+        if (pc && d7B3(pc, veh)) r.raw_7B3_220100 = hex(pc);
+        // Inverter hinten: Motor- und Invertertemperatur (wie Firmware 31)
+        await target("7E3");
+        const pi = await query("22E001", "7EB", 1, 1500);
+        if (pi && d7E3(pi, veh)) r.raw_7E3_22E001 = hex(pi);
+      }
+      const charging = (r.bms_status_raw & 0x80) || (r.battery_power_kw < -1 && !r.motor1_rpm && !r.motor2_rpm);
+      if (charging) {
+        await target("744");
+        for (const did of ["22E002", "22E004"]) {
+          const pl = await query(did, "74C", 1, 1500);
+          if (pl) r[`raw_744_${did}`] = hex(pl);
+        }
+      }
+      // Ladestatistik einmal pro Aufzeichnung (hoechstens drei Versuche)
+      if (statsTries >= 0 && statsTries < 3) {
+        await target("7E4");
+        const ps = await query("220111", "7EC", 1, 1500);
+        if (ps) { r.raw_220111 = hex(ps); statsTries = -1; } else statsTries++;
+      }
+      await target("7E4");
+
+      // Verbrauch wie Consumption::update: Energie integrieren, je km auswerten
+      const now = (performance.now() - t0) / 1000;
+      const driving = r.motor1_rpm !== 0 || r.motor2_rpm !== 0;
+      if (Number.isFinite(trip.lastT) && (driving || r.battery_power_kw >= -1)) trip.kwh += r.battery_power_kw * (now - trip.lastT) / 3600;
+      trip.lastT = now;
+      if (Number.isFinite(r.odometer_km)) {
+        if (!Number.isFinite(trip.odo0)) { trip.odo0 = r.odometer_km; trip.kmOdo = r.odometer_km; trip.kmKwh = trip.kwh; }
+        if (r.odometer_km > trip.kmOdo) {
+          trip.lastKm = (trip.kwh - trip.kmKwh) / (r.odometer_km - trip.kmOdo) * 100;
+          trip.kmOdo = r.odometer_km; trip.kmKwh = trip.kwh;
+        }
+        r.trip_km = r.odometer_km - trip.odo0;
+      }
+      r.trip_kwh = trip.kwh;
+      if (r.trip_km > 0) r.trip_kwh_100km = trip.kwh / r.trip_km * 100;
+      r.last_km_kwh_100km = trip.lastKm;
+      r.time = isoLocal(new Date());
+      r.uptime_s = now;
+      L.lines.push(csvLine(r));
+      show(r, veh);
+      if (performance.now() - savedAt > 10000) { savedAt = performance.now(); saveLog(L).catch(() => {}); }
+      setState(`Verbunden, Auto antwortet`, "on");
+      $("#rec").textContent = `Aufzeichnung ${L.name} · ${L.lines.length - 1} Zeilen`;
+    } else {
+      fails++;
+      setState(fails > 3 ? "Auto antwortet nicht (aus?)" : "Abfrage fehlgeschlagen, neuer Versuch", "err");
+      if (!elm.connected) break;
+    }
+    const took = performance.now() - start;
+    $("#cycle").textContent = `Zyklus ${fmt(took / 1000, 1)} s`;
+    await sleep(Math.max(0, 2000 - took));
+  }
+  if (L.lines.length > 1) await saveLog(L).catch(() => {});
+  renderFiles();
+}
+
+function show(r, veh) {
+  const set = (id, v, d, unit) => { $(id).innerHTML = `${fmt(v, d)}<small>${unit}</small>`; };
+  set("#t_kw", r.battery_power_kw, 1, "kW");
+  $("#t_kw").classList.toggle("regen", r.battery_power_kw < 0);
+  set("#t_soc", r.soc_display_pct, 1, "%");
+  set("#t_kwh", r.remaining_kwh, 1, "kWh");
+  const sp = Number.isFinite(veh.speed) ? Math.abs(veh.speed) : Math.abs(r.motor1_rpm) * 60 / REV_PER_KM;
+  set("#t_speed", sp, 0, "km/h");
+  set("#t_cons", r.trip_kwh_100km, 1, "kWh/100");
+  $("#t_temp").innerHTML = `${fmt(r.battery_temp_min_c)}–${fmt(r.battery_temp_max_c)}<small>°C</small>`;
+  set("#t_out", veh.outside, 1, "°C");
+  set("#t_motor", veh.motor, 0, "°C");
+  set("#t_inv", veh.inverter, 0, "°C");
+  set("#t_rpm_r", r.motor1_rpm, 0, "1/min");
+  set("#t_rpm_f", r.motor2_rpm, 0, "1/min");
+}
+
+async function start() {
+  $("#connect").disabled = true;
+  try {
+    setState("Adapter wählen …");
+    await elm.connect();
+    elm.onDrop = () => { setState("Verbindung zum Adapter verloren", "err"); };
+    setState("Adapter verbunden, starte …", "on");
+    await initElm();
+    try { wakeLock = await navigator.wakeLock.request("screen"); } catch {}
+    running = true;
+    $("#stop").hidden = false; $("#connect").hidden = true;
+    await run();
+  } catch (e) {
+    if (e && e.name === "NotFoundError") setState("Kein Adapter gewählt");
+    else { setState(e.message || String(e), "err"); log(String(e)); }
+  }
+  running = false;
+  try { wakeLock && (await wakeLock.release()); } catch {}
+  elm.disconnect();
+  $("#stop").hidden = true; $("#connect").hidden = false; $("#connect").disabled = false;
+  $("#rec").textContent = "Keine Aufzeichnung";
+}
+
+$("#connect").onclick = start;
+$("#stop").onclick = () => { running = false; $("#stop").disabled = true; setState("Beende …"); setTimeout(() => ($("#stop").disabled = false), 3000); };
+document.addEventListener("visibilitychange", async () => {
+  if (document.visibilityState === "visible" && running && (!wakeLock || wakeLock.released)) {
+    try { wakeLock = await navigator.wakeLock.request("screen"); } catch {}
+  }
+});
+if (!navigator.bluetooth) { $("#nobt").hidden = false; $("#connect").disabled = true; }
+renderFiles();
+// Fuer Tests: Adapter durch eine Attrappe ersetzen
+window.__ioniqLogger = { elm, parseIsotp, csvLine, COLS };
+</script>
+</body>
+</html>
