@@ -94,6 +94,9 @@ pre { font: .75rem/1.35 var(--font-mono); color: var(--muted); max-height: 160px
     <div class="tile"><div class="k">Inverter hinten</div><div class="v" id="t_inv">–<small>°C</small></div></div>
     <div class="tile"><div class="k">Drehzahl hinten</div><div class="v" id="t_rpm_r">–<small>1/min</small></div></div>
     <div class="tile"><div class="k">Drehzahl vorne</div><div class="v" id="t_rpm_f">–<small>1/min</small></div></div>
+    <div class="tile"><div class="k" id="t_cells_n">Zellen</div><div class="v" id="t_cells">–<small>V</small></div></div>
+    <div class="tile"><div class="k">12-V-Batterie</div><div class="v" id="t_aux">–<small>%</small></div></div>
+    <div class="tile"><div class="k">Zustand</div><div class="v" id="t_state">–<small></small></div></div>
   </div>
   <div class="rec"><span id="rec">Keine Aufzeichnung</span><span id="cycle"></span></div>
 
@@ -277,11 +280,43 @@ function d7E3(p, v) {
   const d = p.slice(3);
   v.motor = s16(u16le(d, 25)) / 100;
   v.inverter = s16(u16le(d, 27)) / 100;
+  v.ignV = u16le(d, 15) / 1000;  // Zuendspannung (OBDb IONIQ6_IGN_VOLTAGE)
   return true;
 }
 function d7B3(p, v) {
   if (!ok(p, 0x01, 0x00, 10)) return false;
   v.outside = p[3 + 6] / 2 - 40;
+  return true;
+}
+
+// Zellspannungen: sechs Bloecke mit je 32 Zellen (Byte / 50 = Volt), wie decode_cells
+const CELL_DIDS = ["220102", "220103", "220104", "22010A", "22010B", "22010C"];
+function dCells(p, block, cells) {
+  const id = [0x02, 0x03, 0x04, 0x0a, 0x0b, 0x0c][block];
+  if (!ok(p, 0x01, id, 3 + 4 + 32)) return false;
+  for (let i = 0; i < 32; i++) cells[block * 32 + i] = p[3 + 4 + i] / 50;
+  return true;
+}
+// 12-V-Batterie und Wandler (7E5 22E011), wie decode_7E5
+// Zustand: Hauptrelais (744 22E004, Byte 4 Bit 2; faellt am Ende des Ladens auf 0)
+// und Fahrstufe (7E2 2101, OBDb, am Auto noch nicht geprueft)
+function d744(p, v) {
+  if (!ok(p, 0xe0, 0x04, 3 + 5)) return false;
+  v.relay = (p[3 + 4] >> 2) & 1;
+  return true;
+}
+const GEARS = ["P", "R", "N", "D"];
+function dGear(p, v) {
+  if (!p || p.length < 6 || p[0] !== 0x61 || p[1] !== 0x01) return false;
+  const b = p[2 + 5] & 0x0f;
+  v.gear = [1, 2, 4, 8].includes(b) ? GEARS[Math.log2(b)] : "?";
+  return true;
+}
+function d7E5(p, v) {
+  if (!ok(p, 0xe0, 0x11, 3 + 25)) return false;
+  const d = p.slice(3);
+  v.auxSoc = d[20];
+  v.auxA = u16(d, 18) / 100 - 327;
   return true;
 }
 
@@ -294,7 +329,8 @@ const COLS = ["time", "uptime_s", "soc_bms_pct", "soc_display_pct", "soh_pct", "
   "coolant_inlet_c", "coolant_pump_raw", "battery_thermal", "odometer_km", "trip_km", "trip_kwh", "trip_kwh_100km",
   "last_km_kwh_100km", "tire_fl_bar", "tire_fl_c", "tire_fr_bar", "tire_fr_c", "tire_rl_bar", "tire_rl_c", "tire_rr_bar",
   "tire_rr_c", "raw_220101", "raw_220105", "raw_220106", "raw_22C00B", "raw_7E2_22E004", "raw_7B3_220100",
-  "raw_744_22E002", "raw_744_22E004", "raw_220111", "raw_7E3_22E001"];
+  "raw_744_22E002", "raw_744_22E004", "raw_220111", "raw_7E3_22E001", "raw_744_22E003", "raw_7E5_22E011",
+  "raw_7E5_22E002", ...CELL_DIDS.map((d) => `raw_${d}`), "raw_7E2_2101"];
 const DEC = { soc_bms_pct: 1, soc_display_pct: 1, soh_pct: 1, remaining_kwh: 1, battery_voltage_v: 1, battery_current_a: 1,
   battery_power_kw: 2, cell_v_min: 2, cell_v_max: 2, aux_battery_v: 1, cum_charged_kwh: 1, charge_limit_kw: 2,
   charge_request_a: 1, discharge_limit_kw: 2, trip_kwh: 2, trip_kwh_100km: 1, last_km_kwh_100km: 1,
@@ -419,7 +455,8 @@ async function run() {
   const L = { name: stamp(new Date()) + ".csv", lines: [COLS.join(";")] };
   const trip = { odo0: NaN, kwh: 0, lastT: NaN, kmOdo: NaN, kmKwh: 0, lastKm: NaN };
   const veh = {};
-  let cycle = 0, fails = 0, savedAt = 0, statsTries = 0;
+  const cells = new Array(192).fill(NaN), cellMiss = [0, 0, 0, 0, 0, 0];
+  let cycle = 0, fails = 0, savedAt = 0, statsTries = 0, cellBlock = 0;
   $("#rec").textContent = `Aufzeichnung ${L.name}`;
   while (running) {
     const start = performance.now();
@@ -444,6 +481,9 @@ async function run() {
       const pv = await query("22E004", "7EA", 1, 1500);
       veh.speed = NaN;
       if (pv && d7E2(pv, veh)) r.raw_7E2_22E004 = hex(pv);
+      veh.gear = undefined;
+      const pg = await query("2101", "7EA", 1, 1500);
+      if (pg && dGear(pg, veh)) r.raw_7E2_2101 = hex(pg);
       if (cycle % 5 === 1) {
         await target("7B3");
         const pc = await query("220100", "7BB", 1, 1500);
@@ -454,12 +494,36 @@ async function run() {
         if (pi && d7E3(pi, veh)) r.raw_7E3_22E001 = hex(pi);
       }
       const charging = (r.bms_status_raw & 0x80) || (r.battery_power_kw < -1 && !r.motor1_rpm && !r.motor2_rpm);
-      if (charging) {
+      if (cycle % 5 === 1) {
+        await target("7E5");
+        const pa = await query("22E011", "7ED", 1, 1500);
+        if (pa && d7E5(pa, veh)) r.raw_7E5_22E011 = hex(pa);
+      }
+      if (charging || cycle % 5 === 1) {
+        // Ladesteuergeraet: 22E004 immer (Hauptrelais), die Ladewerte nur beim Laden
         await target("744");
-        for (const did of ["22E002", "22E004"]) {
+        for (const did of charging ? ["22E002", "22E003", "22E004"] : ["22E004"]) {
           const pl = await query(did, "74C", 1, 1500);
           if (pl) r[`raw_744_${did}`] = hex(pl);
+          if (did === "22E004") d744(pl, veh);
         }
+      }
+      if (charging) {
+        // Bordlader (AC-Laden); beim DC-Laden antwortet er einfach nicht
+        await target("7E5");
+        const pb = await query("22E002", "7ED", 1, 1500);
+        if (pb) r.raw_7E5_22E002 = hex(pb);
+      }
+      // Zellspannungen: ein Block je Abfrage, alle 192 Zellen in sechs Zyklen
+      // (Bloecke, die dreimal nicht antworten, werden uebersprungen)
+      await target("7E4");
+      for (let k = 0; k < 6; k++) {
+        const b = cellBlock++ % 6;
+        if (cellMiss[b] >= 3) continue;
+        const pz = await query(CELL_DIDS[b], "7EC", 1, 2000);
+        if (pz && dCells(pz, b, cells)) { r[`raw_${CELL_DIDS[b]}`] = hex(pz); cellMiss[b] = 0; }
+        else cellMiss[b]++;
+        break;
       }
       // Ladestatistik einmal pro Aufzeichnung (hoechstens drei Versuche)
       if (statsTries >= 0 && statsTries < 3) {
@@ -488,7 +552,7 @@ async function run() {
       r.time = isoLocal(new Date());
       r.uptime_s = now;
       L.lines.push(csvLine(r));
-      show(r, veh);
+      show(r, veh, cells);
       if (performance.now() - savedAt > 10000) { savedAt = performance.now(); saveLog(L).catch(() => {}); }
       setState(`Verbunden, Auto antwortet`, "on");
       $("#rec").textContent = `Aufzeichnung ${L.name} · ${L.lines.length - 1} Zeilen`;
@@ -496,6 +560,26 @@ async function run() {
       fails++;
       setState(fails > 3 ? "Auto antwortet nicht (aus?)" : "Abfrage fehlgeschlagen, neuer Versuch", "err");
       if (!elm.connected) break;
+      // Akku schweigt: nachsehen, ob die Zuendung noch an ist (Inverter, Fahrstufe).
+      // Antwortet eines davon, kommt eine Zeile ohne Akkuwerte ins Log.
+      if (fails >= 2 && fails % 3 === 2) {
+        const z = {};
+        await target("7E3");
+        const pi = await query("22E001", "7EB", 1, 1500);
+        if (pi && d7E3(pi, veh)) z.raw_7E3_22E001 = hex(pi);
+        await target("7E2");
+        const pg = await query("2101", "7EA", 1, 1500);
+        if (pg && dGear(pg, veh)) z.raw_7E2_2101 = hex(pg);
+        await target("7E4");
+        if (Object.keys(z).length) {
+          z.time = isoLocal(new Date());
+          z.uptime_s = (performance.now() - t0) / 1000;
+          L.lines.push(csvLine(z));
+          setState("Zündung an, Akku antwortet nicht", "err");
+          $("#rec").textContent = `Aufzeichnung ${L.name} · ${L.lines.length - 1} Zeilen`;
+          showState(veh, false);
+        }
+      }
     }
     const took = performance.now() - start;
     $("#cycle").textContent = `Zyklus ${fmt(took / 1000, 1)} s`;
@@ -505,7 +589,19 @@ async function run() {
   renderFiles();
 }
 
-function show(r, veh) {
+function showState(veh, hv) {
+  const small = [veh.gear, Number.isFinite(veh.ignV) ? `${fmt(veh.ignV, 1)} V` : ""].filter(Boolean).join(" · ");
+  $("#t_state").innerHTML = `${hv === undefined ? "–" : hv ? "HV an" : "HV aus"}<small>${small}</small>`;
+}
+function show(r, veh, cells) {
+  if (veh.relay !== undefined || veh.gear) showState(veh, veh.relay === undefined ? undefined : veh.relay === 1);
+  const cv = cells.filter(Number.isFinite);
+  if (cv.length) {
+    const lo = Math.min(...cv), hi = Math.max(...cv);
+    $("#t_cells").innerHTML = `${fmt(lo, 2)}–${fmt(hi, 2)}<small>V</small>`;
+    $("#t_cells_n").textContent = `Zellen ${cv.length < 192 ? `(${cv.length}/192)` : ""} · Δ ${fmt((hi - lo) * 1000, 0)} mV`;
+  }
+  if (Number.isFinite(veh.auxSoc)) $("#t_aux").innerHTML = `${fmt(veh.auxSoc)}<small>% · ${fmt(veh.auxA, 1)} A</small>`;
   const set = (id, v, d, unit) => { $(id).innerHTML = `${fmt(v, d)}<small>${unit}</small>`; };
   set("#t_kw", r.battery_power_kw, 1, "kW");
   $("#t_kw").classList.toggle("regen", r.battery_power_kw < 0);

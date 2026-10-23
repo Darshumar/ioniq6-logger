@@ -242,24 +242,65 @@ const DECODERS = [
   } },
   { cols: ["raw_7E3_22E001"], id: [0xE0, 0x01], min: 61, f: (d, o) => {
     o.motor_c = S(U16LE(d, 25)) / 100; o.inverter_c = S(U16LE(d, 27)) / 100; o.heatsink_c = S(U16LE(d, 56)) / 100;
+    o.ign_v = U16LE(d, 15) / 1000;
+  } },
+  // Fahrstufe (Dienst 21, Antwort 61 01; OBDb, am Auto noch nicht geprueft): 0=P 1=R 2=N 3=D
+  { cols: ["raw_7E2_2101"], svc: 0x61, id: [0x01], min: 8, f: (d, o) => {
+    const b = d[5] & 0x0f;
+    if ([1, 2, 4, 8].includes(b)) o.gear = Math.log2(b);
   } },
   { cols: ["raw_7B3_220100"], id: [0x01, 0x00], min: 10, f: (d, o) => { o.inside_c = d[5] / 2 - 40; o.outside_c = d[6] / 2 - 40; } },
   { cols: ["raw_744_22E002"], id: [0xE0, 0x02], min: 30, f: (d, o) => {
     o.evse_v = U16(d, 17) / 10; o.evse_a = U16(d, 19) / 10; o.evse_max_kw = U16(d, 25) / 100;
   } },
   { cols: ["raw_744_22E004"], id: [0xE0, 0x04], min: 14, f: (d, o) => {
+    o.hv_relay = (d[4] >> 2) & 1;
     o.plugged = d[4] & 0x02 ? 1 : 0; o.dc_inlet1_c = d[8] - 50; o.dc_inlet2_c = d[9] - 50; o.ac_inlet_c = d[10] - 50;
   } },
   { cols: ["raw_220111"], id: [0x01, 0x11], min: 23, f: (d, o) => {
     o.ac_count = U32(d, 4); o.dc_count = U32(d, 8); o.ac_kwh = U32(d, 12); o.dc_kwh = U32(d, 16);
   } },
   { cols: ["raw_7E5_22E011", "raw_7E5_E011"], id: [0xE0, 0x11], min: 28, f: (d, o) => {
-    const v = U16(d, 10) / 1000, a = U16(d, 12) / 100;
+    // wie decode.cpp decode_7E5
+    const v = U16(d, 10) / 1000, a = U16(d, 12) / 1000;
     o.ldc_temp_c = d[9] - 100; o.ldc_out_v = v; o.ldc_out_a = a; o.ldc_kw = v * a / 1000;
-    o.aux_current_a = U16(d, 18) / 100 - 327; o.aux_soc_pct = d[20]; o.aux_temp_c = U16(d, 23) / 2 - 40;
+    o.aux_current_a = U16(d, 18) / 100 - 327; o.aux_soc_pct = d[20];
+    o.aux_v = U16(d, 21) / 1000 + 6; o.aux_temp_c = U16(d, 23) / 2 - 40;
+  } },
+  { cols: ["raw_7E5_22E002"], id: [0xE0, 0x02], min: 32, f: (d, o) => {
+    o.obc_ac_v = U16(d, 4) / 10; o.obc_ac_hz = d[10]; o.obc_ac_a = U16(d, 11) / 100;
+    o.obc_dc_v = U16(d, 19) / 10; o.obc_dc_a = U16(d, 21) / 100; o.obc_c = Math.max(d[27], d[28]) - 40;
+    o.obc_kw = o.obc_ac_v * o.obc_ac_a / 1000;
   } },
 ];
+// Zellspannungen: sechs Bloecke zu 32 Zellen (220102-220104, 22010A-22010C), der Logger fragt
+// je Zeile einen Block ab. Pro Zeile gilt der zuletzt gesehene Stand jedes Blocks.
+const CELL_DIDS = ["220102", "220103", "220104", "22010A", "22010B", "22010C"];
+function decodeCells(cols, strs, n) {
+  const src = CELL_DIDS.map((d) => strs[`raw_${d}`]);
+  if (!src.some(Boolean)) return;
+  const cells = new Array(192).fill(NaN);
+  const lo = new Array(n).fill(NaN), hi = new Array(n).fill(NaN), cnt = new Array(n).fill(NaN);
+  for (let i = 0; i < n; i++) {
+    let fresh = false;
+    src.forEach((col, b) => {
+      const s = col && col[i];
+      if (!s) return;
+      const p = s.split(/\s+/).map((h) => parseInt(h, 16));
+      if (p.length < 39 || p[0] !== 0x62 || p[1] !== 0x01 || p[2] !== parseInt(CELL_DIDS[b].slice(4), 16)) return;
+      for (let k = 0; k < 32; k++) cells[b * 32 + k] = p[7 + k] / 50;
+      fresh = true;
+    });
+    if (!fresh) continue;
+    const v = cells.filter((x) => Number.isFinite(x) && x > 0);
+    if (!v.length) continue;
+    lo[i] = Math.min(...v); hi[i] = Math.max(...v); cnt[i] = v.length;
+  }
+  cols.cells_min_v = lo; cols.cells_max_v = hi; cols.cells_count = cnt;
+  cols.cells_spread_mv = lo.map((x, i) => (hi[i] - x) * 1000);
+}
 function decodeRaw(cols, strs, n) {
+  decodeCells(cols, strs, n);
   const own = new Set(Object.keys(cols));
   for (const dec of DECODERS) {
     const col = dec.cols.map((c) => strs[c]).find(Boolean);
@@ -268,9 +309,10 @@ function decodeRaw(cols, strs, n) {
       const s = col[i];
       if (!s) continue;
       const p = s.split(/\s+/).map((h) => parseInt(h, 16));
-      if (p.length < dec.min || p.some(Number.isNaN) || p[0] !== 0x62 || p[1] !== dec.id[0] || p[2] !== dec.id[1]) continue;
+      const hl = 1 + dec.id.length;
+      if (p.length < dec.min || p.some(Number.isNaN) || p[0] !== (dec.svc || 0x62) || dec.id.some((b, j) => p[1 + j] !== b)) continue;
       const o = {};
-      dec.f(p.slice(3), o);
+      dec.f(p.slice(hl), o);
       for (const k in o) {
         if (own.has(k)) continue;
         (cols[k] ||= new Array(n).fill(NaN))[i] = o[k];
@@ -380,15 +422,22 @@ function specs(L) {
       { title: "Außen und innen", unit: "°C", d: 1, series: [S("outside_c", "außen", "--s1"), S("inside_c", "innen", "--s2")] },
       { title: "Antrieb hinten", unit: "°C", d: 0, series: [S("motor_c", "Motor", "--s1"), S("inverter_c", "Inverter", "--s2"), S("heatsink_c", "Kühlkörper", "--s3")] },
       { title: "Zellspannung", unit: "V", d: 2, series: [S("cell_v_min", "min", "--s1"), S("cell_v_max", "max", "--s2")] },
+      { title: "Zellen (alle Blöcke)", unit: "V", d: 2, series: [S("cells_min_v", "niedrigste", "--s1"), S("cells_max_v", "höchste", "--s2")] },
+      { title: "Zellspreizung", unit: "mV", d: 0, series: [S("cells_spread_mv", "max − min", "--s1")], zero: true },
+      { title: "Hochvoltrelais", unit: "1 = an", d: 0, step: true, series: [S("hv_relay", "Hauptrelais", "--s1")], zero: true },
+      { title: "Zündspannung", unit: "V", d: 1, series: [S("ign_v", "Inverter", "--s1")] },
+      { title: "Fahrstufe", unit: "0 P · 1 R · 2 N · 3 D", d: 0, step: true, series: [S("gear", "Stufe", "--s1")], zero: true },
       { title: "Hochvolt-Spannung", unit: "V", d: 1, series: [S("battery_voltage_v", "Akku", "--s1")] },
       { title: "Akkustrom", unit: "A", d: 1, series: [S("battery_current_a", "Strom", "--s1")], zero: true },
       { title: "Ladesäule", charge: true, unit: "kW", d: 0, series: [S("evse_max_kw", "bietet höchstens", "--s1")], zero: true },
       { title: "Säulenstrom", charge: true, unit: "A", d: 0, series: [S("evse_a", "Strom", "--s1")], zero: true },
       { title: "Ladebuchse", charge: true, unit: "°C", d: 0, series: [S("dc_inlet1_c", "DC 1", "--s1"), S("dc_inlet2_c", "DC 2", "--s2"), S("ac_inlet_c", "AC", "--s3")] },
       { title: "Reifendruck", unit: "bar", d: 2, series: [S("tire_fl_bar", "VL", "--s1"), S("tire_fr_bar", "VR", "--s2"), S("tire_rl_bar", "HL", "--s3"), S("tire_rr_bar", "HR", "--s4")] },
-      { title: "12-V-Bordnetz", unit: "V", d: 1, series: [S("aux_battery_v", "BMS", "--s1"), S("ldc_out_v", "Wandler", "--s2")] },
+      { title: "12-V-Bordnetz", unit: "V", d: 1, series: [S("aux_battery_v", "BMS", "--s1"), S("ldc_out_v", "Wandler", "--s2"), S("aux_v", "Batterie", "--s3")] },
       { title: "12-V-Verbraucher", unit: "kW", d: 2, series: [S("ldc_kw", "Wandler", "--s1")], zero: true },
       { title: "12-V-Batterie", unit: "%", d: 0, series: [S("aux_soc_pct", "Ladestand", "--s1")] },
+      { title: "12-V-Batteriestrom", unit: "A", d: 1, series: [S("aux_current_a", "Strom", "--s1")], zero: true },
+      { title: "Bordlader (AC)", charge: true, unit: "kW", d: 1, series: [S("obc_kw", "Netz", "--s1")], zero: true },
       { title: "Isolationswiderstand", unit: "kΩ", d: 0, series: [S("isolation_kohm", "HV-Akku", "--s1")], zero: true },
     ];
   } else if (L.kind === "akku") {
