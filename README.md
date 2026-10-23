@@ -1,12 +1,17 @@
-# Ioniq 6 Logger
+# Ioniq 6
 
-Webseite, die sich per Web Bluetooth direkt mit einem Vgate-OBD2-Adapter (ELM327, BLE)
-verbindet, Akku- und Fahrdaten eines Hyundai Ioniq 6 ausliest und als CSV aufzeichnet.
+Web-App für den Hyundai Ioniq 6, als App installierbar unter Windows (Edge/Chrome) und Android (Chrome):
+https://darshumar.github.io/ioniq6-logger/
 
-Öffnen: https://darshumar.github.io/ioniq6-logger/ (Chrome auf Android oder Chrome/Edge am PC).
+- **Live** (`index.html`): verbindet sich per Web Bluetooth mit dem Vgate-OBD2-Adapter (ELM327, BLE),
+  zeigt Akku- und Fahrdaten live und zeichnet sie als CSV auf (gleiches Format wie die Logs des
+  ESP32-Displays). Aufzeichnungen bleiben auf dem Gerät (IndexedDB).
+- **Logs** (`logs.html`): zeigt Fahrten als Diagramme: Aufzeichnungen dieses Geräts, geöffnete CSV-Dateien
+  und die ESP-Logs aus dem privaten Repo `Darshumar/Ioniq6_obd` (`logs/esp32`). Dafür braucht die App einen
+  Fine-grained Token mit „Contents: Read-only“ nur für dieses Repo; er wird nur im Browser gespeichert.
 
-Das CSV-Format entspricht den Logs des ESP32-Displays aus dem (privaten) Projekt
-`ioniq6_obd`; `index.html` ist dort eine Kopie von `web/logger.html`.
+Installieren unter Windows: Seite in Edge öffnen → Menü „…“ → Apps → „Diese Website als App installieren“
+(in Chrome: Symbol rechts in der Adressleiste). Danach startet „Ioniq 6“ aus dem Startmenü im eigenen Fenster.
 
-Ein Teil der Zuordnungen der Messwerte stammt aus
-[OBDb Hyundai-IONIQ-6](https://github.com/OBDb/Hyundai-IONIQ-6) (CC BY-SA 4.0).
+Die Umrechnung der Rohwerte spiegelt `esp32/ioniq6_display/decode.cpp` aus dem Projekt `ioniq6_obd`.
+Ein Teil der Zuordnungen stammt aus [OBDb Hyundai-IONIQ-6](https://github.com/OBDb/Hyundai-IONIQ-6) (CC BY-SA 4.0).

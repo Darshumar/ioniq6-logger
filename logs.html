@@ -1,0 +1,858 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ioniq 6 Logs</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="theme-color" content="#0e1216">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: Kopfzeile mit Log-Auswahl, darunter Kennzahlen, dann gestapelte Diagramme mit gemeinsamer Zeitachse */
+:root {
+  --bg: #f4f6f8;
+  --surface: #ffffff;
+  --fg: #141a21;
+  --muted: #5a6572;
+  --line: #dfe4ea;
+  --grid: #e9edf1;
+  --accent: #1f6fd1;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+  --sel: rgba(42,120,214,.14);
+  --warn: #c2410c;
+  --font-display: "Saira", "Arial Narrow", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1216; --surface: #161b21; --fg: #e7ebef; --muted: #98a2ad; --line: #283039; --grid: #222930;
+    --accent: #5b9cf0; --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --sel: rgba(57,135,229,.22);
+    --warn: #f08a4b; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1216; --surface: #161b21; --fg: #e7ebef; --muted: #98a2ad; --line: #283039; --grid: #222930;
+  --accent: #5b9cf0; --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --sel: rgba(57,135,229,.22);
+  --warn: #f08a4b; color-scheme: dark;
+}
+body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 14px; line-height: 1.45; }
+.wrap { max-width: 1360px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 20px 40px; display: grid; gap: 18px; }
+header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px; }
+h1 { font-family: var(--font-display); font-weight: 600; font-size: 1.9rem; letter-spacing: .01em; margin: 0; line-height: 1.1; text-wrap: balance; }
+.sub { color: var(--muted); margin: 4px 0 0; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; }
+button, .btn { font: inherit; font-weight: 500; border: 1px solid var(--line); background: var(--surface); color: var(--fg); padding: 7px 12px; border-radius: 6px; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+button:hover, .btn:hover { border-color: var(--accent); }
+button:focus-visible, .btn:focus-visible, .chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.files { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+.chip { flex: none; text-align: left; border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 8px 12px; cursor: pointer; color: var(--fg); font: inherit; display: grid; gap: 1px; }
+.chip b { font-family: var(--font-mono); font-weight: 500; font-size: .85rem; }
+.chip span { color: var(--muted); font-size: .8rem; }
+.chip[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.tile { padding: 12px 14px; box-shadow: 1px 1px 0 var(--line); display: grid; gap: 2px; min-width: 0; }
+.tile .k { color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .07em; }
+.tile .v { font-family: var(--font-display); font-weight: 500; font-size: 1.45rem; line-height: 1.15; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tile .v small { font-family: var(--font-body); font-size: .8rem; color: var(--muted); font-weight: 400; margin-left: 3px; }
+.tile .n { color: var(--muted); font-size: .78rem; }
+.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding-block: 8px; border-bottom: 1px solid var(--line); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+.cursor { font-family: var(--font-mono); font-size: .85rem; font-variant-numeric: tabular-nums; }
+.hint { color: var(--muted); font-size: .8rem; }
+.charts { display: grid; gap: 12px; }
+.chart { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px 6px; min-width: 0; }
+.chart h2 { font-family: var(--font-display); font-weight: 500; font-size: 1rem; margin: 0; display: flex; gap: 6px; align-items: baseline; }
+.chart h2 em { font-style: normal; color: var(--muted); font-family: var(--font-body); font-size: .8rem; font-weight: 400; }
+.chart .top { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; align-items: baseline; }
+.legend { display: flex; flex-wrap: wrap; gap: 2px 14px; font-size: .82rem; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.legend i { width: 10px; height: 3px; border-radius: 2px; display: inline-block; }
+.legend b { font-family: var(--font-mono); font-weight: 500; color: var(--fg); font-variant-numeric: tabular-nums; }
+canvas { display: block; width: 100%; height: 150px; touch-action: pan-y; cursor: crosshair; }
+.empty { background: var(--surface); border: 1.5px dashed var(--line); border-radius: 10px; padding: 36px 20px; text-align: center; color: var(--muted); }
+.empty strong { color: var(--fg); display: block; font-size: 1.05rem; margin-bottom: 4px; }
+[hidden] { display: none !important; }
+.drop { position: fixed; inset: 0; z-index: 20; background: var(--sel); border: 3px dashed var(--accent); display: grid; place-items: center; font-family: var(--font-display); font-size: 1.6rem; color: var(--fg); pointer-events: none; }
+.note { color: var(--muted); font-size: .8rem; max-width: 70ch; }
+.err { color: var(--warn); }
+@media (max-width: 520px) { h1 { font-size: 1.5rem; } canvas { height: 130px; } .tile .v { font-size: 1.25rem; } }
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+[hidden] { display: none !important; }
+code { font-family: var(--font-mono); font-size: .9em; }
+.nav { display: flex; gap: 4px; }
+.nav a { color: var(--muted); text-decoration: none; padding: 6px 12px; border-radius: 6px; font-weight: 500; }
+.nav a[aria-current="page"] { background: var(--surface); color: var(--fg); box-shadow: inset 0 0 0 1px var(--line); }
+.layout { display: grid; grid-template-columns: 290px minmax(0, 1fr); gap: 18px; align-items: start; }
+.side { position: sticky; top: 12px; display: grid; gap: 10px; max-height: calc(100vh - 24px); min-width: 0; }
+.main { display: grid; gap: 18px; min-width: 0; }
+.list { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: auto; min-height: 120px; }
+.list h3 { margin: 0; padding: 8px 12px 4px; font-size: .72rem; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); font-weight: 500; position: sticky; top: 0; background: var(--surface); }
+.item { display: grid; grid-template-columns: 1fr auto; gap: 0 8px; width: 100%; text-align: left; border: 0; border-left: 3px solid transparent; background: none; color: var(--fg); font: inherit; padding: 6px 12px 6px 9px; cursor: pointer; }
+.item:hover { background: var(--bg); }
+.item[aria-pressed="true"] { border-left-color: var(--accent); background: var(--bg); }
+.item b { font-weight: 500; font-variant-numeric: tabular-nums; }
+.item span { color: var(--muted); font-size: .8rem; grid-column: 1 / -1; }
+.item i { font-style: normal; font-size: .7rem; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; align-self: center; }
+.opts { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; font-size: .85rem; color: var(--muted); }
+.gh { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: grid; gap: 8px; font-size: .85rem; }
+.gh input { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); width: 100%; min-width: 0; }
+.gh .row { display: flex; gap: 6px; }
+.gh p { margin: 0; color: var(--muted); }
+.gh a { color: var(--accent); }
+@media (max-width: 900px) {
+  .layout { grid-template-columns: minmax(0, 1fr); }
+  .side { position: static; max-height: none; }
+  .list { max-height: 40vh; }
+}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Ioniq 6 Logs</h1>
+      <p class="sub" id="sub">Fahrten vom ESP-Display und vom Logger als Diagramme</p>
+    </div>
+    <nav class="nav" aria-label="Bereiche"><a href="./">Live</a><a href="logs.html" aria-current="page">Logs</a></nav>
+  </header>
+
+  <div class="layout">
+  <aside class="side">
+    <div class="actions">
+      <button class="primary" id="open" type="button">CSV öffnen</button>
+      <button type="button" id="reload">Aktualisieren</button>
+      <input type="file" id="file" accept=".csv,text/csv" multiple hidden>
+    </div>
+    <label class="opts"><input type="checkbox" id="all"> auch Diagnose- und Akku-Logs</label>
+    <div class="list" id="files" role="group" aria-label="Logs"></div>
+    <details class="gh" id="ghbox">
+      <summary>GitHub-Zugang</summary>
+      <p>Damit die App die ESP-Logs aus deinem privaten Repo laden kann, braucht sie einen GitHub-Schlüssel: auf <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">GitHub einen „Fine-grained token“ anlegen</a>, nur für das Repo <b>Ioniq6_obd</b>, Berechtigung „Contents: Read-only“. Er bleibt nur auf diesem Gerät.</p>
+      <div class="row"><input id="token" type="password" autocomplete="off" placeholder="github_pat_…" aria-label="GitHub-Schlüssel"><button type="button" id="saveToken">Speichern</button></div>
+      <p id="ghstate"></p>
+    </details>
+  </aside>
+  <div class="main">
+  <div class="tiles" id="tiles" hidden></div>
+
+  <div class="bar" id="bar" hidden>
+    <div class="cursor" id="cursor">–</div>
+    <div class="actions"><span class="hint" id="hint">Ziehen zum Zoomen, Doppelklick zurück</span><button type="button" id="reset" hidden>Ganze Fahrt</button></div>
+  </div>
+
+  <div class="charts" id="charts"></div>
+
+  <div class="empty" id="empty" hidden>
+    <strong>Noch kein Log geladen</strong>
+    Wähle links eine Fahrt aus, zieh eine CSV-Datei hierher oder trag unter „GitHub-Zugang“ deinen Schlüssel ein, dann erscheinen die Logs vom ESP.
+  </div>
+  </div>
+  </div>
+
+  <p class="note">Dateien, die du öffnest, bleiben auf diesem Gerät und werden nirgends hochgeladen. Die Geschwindigkeit kommt vom Fahrzeugrechner, bei alten Logs ist sie aus der Drehzahl berechnet. Restenergie, Isolation, Temperaturen, Ladesäule und Ladestatistik liest die App aus den Rohantworten im Log; die Zuordnung stammt teils aus <a href="https://github.com/OBDb/Hyundai-IONIQ-6" target="_blank" rel="noopener">OBDb Hyundai-IONIQ-6</a> (CC BY-SA 4.0).</p>
+</div>
+<div class="drop" id="drop" hidden>CSV hier ablegen</div>
+
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+const state = { files: [], cur: null, view: null, hover: null, charts: [] };
+const nf = (d) => new Intl.NumberFormat("de-DE", { minimumFractionDigits: d, maximumFractionDigits: d });
+const fmt = (v, d = 1) => (Number.isFinite(v) ? nf(d).format(v) : "–");
+const REV_PER_KM = 10.65 * 1000 / 2.23;
+
+// ---------- Einlesen ----------
+function parseCSV(text, name) {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim());
+  if (lines.length < 2) throw new Error("enthält keine Datenzeilen");
+  const sep = lines[0].includes(";") ? ";" : ",";
+  const head = lines[0].split(sep).map((s) => s.trim());
+  const cols = {}, strs = {};
+  head.forEach((h) => (cols[h] = []));
+  const times = [];
+  for (let r = 1; r < lines.length; r++) {
+    const p = lines[r].split(sep);
+    head.forEach((h, i) => {
+      const s = (p[i] ?? "").trim();
+      if (h === "time") times.push(s);
+      else if (h.startsWith("raw_") || h === "battery_thermal") (strs[h] ||= []).push(s);
+      else cols[h].push(s === "" ? NaN : Number(s));
+    });
+  }
+  delete cols.time;
+  const n = lines.length - 1;
+  let kind = "generic";
+  if (cols.battery_power_kw) kind = "drive";
+  else if (cols.battery_v && cols.clock_s) kind = "akku";
+
+  // x-Achse in Sekunden ab Start, dazu die Uhrzeit des Starts, falls bekannt
+  const parseT = (s) => { if (!s) return NaN; const d = new Date(s.replace(" ", "T")); return d.getTime(); };
+  let x = new Array(n), t0 = NaN;
+  const base = cols.uptime_s || cols.clock_s;
+  if (base) {
+    const b0 = base.find(Number.isFinite);
+    for (let i = 0; i < n; i++) x[i] = base[i] - b0;
+    const i = times.findIndex((s) => Number.isFinite(parseT(s)));
+    if (i >= 0) t0 = parseT(times[i]) - x[i] * 1000;
+    else if (cols.clock_s && b0 > 1.7e9) t0 = b0 * 1000;
+  } else if (times.some((s) => Number.isFinite(parseT(s)))) {
+    const ts = times.map(parseT);
+    t0 = ts.find(Number.isFinite);
+    for (let i = 0; i < n; i++) x[i] = (ts[i] - t0) / 1000;
+  } else {
+    for (let i = 0; i < n; i++) x[i] = i;
+  }
+  // ab Firmware 29 traegt der Dateiname die Startzeit, auch wenn die Zeitspalte leer ist
+  const m = name.match(/(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/);
+  if (!Number.isFinite(t0) && m && base) t0 = new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime();
+  decodeRaw(cols, strs, n);
+  if (kind === "drive" && cols.motor1_rpm) cols.speed_kmh = cols.motor1_rpm.map((r) => Math.abs(r) * 60 / REV_PER_KM);
+  if (cols.vcu_speed_kmh) cols.vcu_speed_abs = cols.vcu_speed_kmh.map(Math.abs);
+  // Luecke im Log (Verbindung weg): Linie dort unterbrechen
+  const dts = x.slice(1).map((v, i) => v - x[i]).filter((d) => d > 0).sort((a, b) => a - b);
+  const gap = Math.max(30, 5 * (dts[dts.length >> 1] || 0));
+  const log = { name, kind, n, x, t0, cols, strs, gap, xIsIndex: !base && !Number.isFinite(t0) };
+  log.summary = summarize(log);
+  return log;
+}
+
+// Rohantworten der Steuergeraete in Werte umrechnen, wie in decode.cpp / ioniq6_decode.py
+// (Zuordnung teils aus OBDb Hyundai-IONIQ-6, CC BY-SA 4.0). Spalten, die das Log schon
+// direkt enthaelt (PC-Leser), bleiben unangetastet.
+const U16 = (d, i) => (d[i] << 8) | d[i + 1];
+const U16LE = (d, i) => d[i] | (d[i + 1] << 8);
+const U32 = (d, i) => d[i] * 16777216 + (d[i + 1] << 16) + (d[i + 2] << 8) + d[i + 3];
+const S = (v) => (v & 0x8000 ? v - 0x10000 : v);
+const DECODERS = [
+  { cols: ["raw_220101"], id: [0x01, 0x01], min: 60, f: (d, o) => {
+    o.battery_inlet_c = d[22] - 40;
+    if (d.length >= 59) o.isolation_kohm = U16(d, 57);
+  } },
+  { cols: ["raw_220105"], id: [0x01, 0x05], min: 46, f: (d, o) => { o.bms_energy_kwh = U16(d, 28) * 2 / 1000; } },
+  { cols: ["raw_7E2_22E004", "raw_7E2_E004"], id: [0xE0, 0x04], min: 15, f: (d, o) => {
+    o.accel_pedal_pct = U16LE(d, 8) / 512;
+    o.vcu_speed_kmh = S(U16LE(d, 10)) * 0.015625;
+  } },
+  { cols: ["raw_7E3_22E001"], id: [0xE0, 0x01], min: 61, f: (d, o) => {
+    o.motor_c = S(U16LE(d, 25)) / 100; o.inverter_c = S(U16LE(d, 27)) / 100; o.heatsink_c = S(U16LE(d, 56)) / 100;
+  } },
+  { cols: ["raw_7B3_220100"], id: [0x01, 0x00], min: 10, f: (d, o) => { o.inside_c = d[5] / 2 - 40; o.outside_c = d[6] / 2 - 40; } },
+  { cols: ["raw_744_22E002"], id: [0xE0, 0x02], min: 30, f: (d, o) => {
+    o.evse_v = U16(d, 17) / 10; o.evse_a = U16(d, 19) / 10; o.evse_max_kw = U16(d, 25) / 100;
+  } },
+  { cols: ["raw_744_22E004"], id: [0xE0, 0x04], min: 14, f: (d, o) => {
+    o.plugged = d[4] & 0x02 ? 1 : 0; o.dc_inlet1_c = d[8] - 50; o.dc_inlet2_c = d[9] - 50; o.ac_inlet_c = d[10] - 50;
+  } },
+  { cols: ["raw_220111"], id: [0x01, 0x11], min: 23, f: (d, o) => {
+    o.ac_count = U32(d, 4); o.dc_count = U32(d, 8); o.ac_kwh = U32(d, 12); o.dc_kwh = U32(d, 16);
+  } },
+  { cols: ["raw_7E5_22E011", "raw_7E5_E011"], id: [0xE0, 0x11], min: 28, f: (d, o) => {
+    const v = U16(d, 10) / 1000, a = U16(d, 12) / 100;
+    o.ldc_temp_c = d[9] - 100; o.ldc_out_v = v; o.ldc_out_a = a; o.ldc_kw = v * a / 1000;
+    o.aux_current_a = U16(d, 18) / 100 - 327; o.aux_soc_pct = d[20]; o.aux_temp_c = U16(d, 23) / 2 - 40;
+  } },
+];
+function decodeRaw(cols, strs, n) {
+  const own = new Set(Object.keys(cols));
+  for (const dec of DECODERS) {
+    const col = dec.cols.map((c) => strs[c]).find(Boolean);
+    if (!col) continue;
+    for (let i = 0; i < n; i++) {
+      const s = col[i];
+      if (!s) continue;
+      const p = s.split(/\s+/).map((h) => parseInt(h, 16));
+      if (p.length < dec.min || p.some(Number.isNaN) || p[0] !== 0x62 || p[1] !== dec.id[0] || p[2] !== dec.id[1]) continue;
+      const o = {};
+      dec.f(p.slice(3), o);
+      for (const k in o) {
+        if (own.has(k)) continue;
+        (cols[k] ||= new Array(n).fill(NaN))[i] = o[k];
+      }
+    }
+  }
+}
+
+const finite = (a) => (a || []).filter(Number.isFinite);
+const first = (a) => finite(a)[0];
+const last = (a) => { const f = finite(a); return f[f.length - 1]; };
+const max = (a) => { const f = finite(a); return f.length ? Math.max(...f) : NaN; };
+const min = (a) => { const f = finite(a); return f.length ? Math.min(...f) : NaN; };
+
+function integrate(x, v, pred = () => true) {
+  let e = 0;
+  for (let i = 1; i < x.length; i++) {
+    const dt = x[i] - x[i - 1];
+    if (!(dt > 0 && dt < 30) || !Number.isFinite(v[i]) || !Number.isFinite(v[i - 1])) continue;
+    const m = (v[i] + v[i - 1]) / 2;
+    if (pred(m)) e += m * dt / 3600;
+  }
+  return e;
+}
+
+function summarize(L) {
+  const c = L.cols, s = { dur: L.x[L.n - 1] - L.x[0] };
+  if (L.kind === "drive") {
+    const odo = last(c.odometer_km) - first(c.odometer_km);
+    s.km = odo > 0 ? odo : max(c.trip_km);
+    s.kwh = last(c.trip_kwh);
+    if (!(s.kwh > 0)) s.kwh = integrate(L.x, c.battery_power_kw);
+    s.regen = -integrate(L.x, c.battery_power_kw, (m) => m < 0);
+    s.cons = s.km >= 1 ? s.kwh / s.km * 100 : last(c.trip_kwh_100km);
+    s.soc0 = first(c.soc_display_pct); s.soc1 = last(c.soc_display_pct);
+    s.pmax = max(c.battery_power_kw); s.pmin = min(c.battery_power_kw);
+    s.vmax = Number.isFinite(max(c.vcu_speed_abs)) ? max(c.vcu_speed_abs) : max(c.speed_kmh);
+    s.vSrc = Number.isFinite(max(c.vcu_speed_abs)) ? "vom Fahrzeug" : "berechnet";
+    const en = finite(c.bms_energy_kwh).length ? c.bms_energy_kwh : c.remaining_kwh;
+    s.e0 = first(en); s.e1 = last(en);
+    s.iso = min(c.isolation_kohm);
+    s.out0 = first(c.outside_c); s.out1 = last(c.outside_c);
+    s.stats = Number.isFinite(last(c.ac_count)) ? { ac: last(c.ac_count), dc: last(c.dc_count), acKwh: last(c.ac_kwh), dcKwh: last(c.dc_kwh) } : null;
+    // Ladevorgang: das Auto steht und der Akku nimmt die meiste Zeit Leistung auf
+    const pw = finite(c.battery_power_kw);
+    s.charging = !(s.km >= 1) && pw.length > 10 && pw.filter((p) => p < -1).length > pw.length / 2;
+    s.charged = -integrate(L.x, c.battery_power_kw, (m) => m < 0);
+    s.evseMax = max(c.evse_max_kw);
+    s.tmin = min(c.battery_temp_min_c); s.tmax = max(c.battery_temp_max_c);
+  } else if (L.kind === "akku") {
+    s.v0 = first(c.battery_v); s.v1 = last(c.battery_v); s.vmin = min(c.battery_v);
+    s.p0 = first(c.battery_pct); s.p1 = last(c.battery_pct);
+    s.wakes = finite(c.battery_v).length;
+    s.awake = finite(c.awake_ms).reduce((a, b) => a + b, 0) / Math.max(1, finite(c.awake_ms).length);
+  }
+  return s;
+}
+
+// ---------- Formate ----------
+function fmtDur(sec) {
+  if (!Number.isFinite(sec)) return "–";
+  sec = Math.round(sec);
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  return h ? `${h}:${String(m).padStart(2, "0")} h` : `${m}:${String(s).padStart(2, "0")} min`;
+}
+const two = (v) => String(v).padStart(2, "0");
+function clock(ms, secs) {
+  const d = new Date(ms);
+  return `${two(d.getHours())}:${two(d.getMinutes())}` + (secs ? `:${two(d.getSeconds())}` : "");
+}
+function dateStr(ms) { return new Date(ms).toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "numeric", year: "numeric" }); }
+function fmtX(L, x, step) {
+  if (L.xIsIndex) return `#${Math.round(x)}`;
+  if (Number.isFinite(L.t0)) return clock(L.t0 + x * 1000, step < 60);
+  if (step >= 3600 || L.x[L.n - 1] >= 3 * 3600) return `${fmt(x / 3600, step >= 3600 ? 0 : 1)} h`;
+  const m = Math.floor(x / 60), s = Math.round(x % 60);
+  return step < 60 ? `${m}:${two(s)}` : `${m} min`;
+}
+
+// ---------- Diagramm-Beschreibung ----------
+function specs(L) {
+  const c = L.cols;
+  const S = (key, label, color) => {
+    const v = c[key];
+    // typischer Abstand der Messpunkte dieser Reihe; seltene Abfragen werden verbunden
+    let gap = L.gap;
+    if (v) {
+      const xs = [];
+      for (let i = 0; i < L.n; i++) if (Number.isFinite(v[i])) xs.push(L.x[i]);
+      const d = xs.slice(1).map((x, i) => x - xs[i]).filter((t) => t > 0).sort((a, b) => a - b);
+      gap = Math.max(gap, 5 * (d[d.length >> 1] || 0));
+    }
+    return { key, label, color, v, gap };
+  };
+  const has = (s) => s.v && s.v.some(Number.isFinite);
+  let list;
+  if (L.kind === "drive") {
+    list = [
+      { title: "Leistung", unit: "kW", d: 1, power: true, series: [S("battery_power_kw", "Akku", "--s1")], zero: true },
+      { title: "Geschwindigkeit", unit: "km/h", d: 0, series: [S("vcu_speed_abs", "Fahrzeug", "--s1"), S("speed_kmh", "aus Motordrehzahl", "--s2")], zero: true },
+      { title: "Motordrehzahl", unit: "1/min", d: 0, series: [S("motor1_rpm", "hinten", "--s1"), S("motor2_rpm", "vorne", "--s2")], zero: true },
+      { title: "Fahrpedal", unit: "%", d: 0, series: [S("accel_pedal_pct", "Stellung", "--s1")], zero: true },
+      { title: "Ladestand", unit: "%", d: 1, series: [S("soc_display_pct", "Anzeige", "--s1"), S("soc_bms_pct", "BMS", "--s2")] },
+      { title: "Restenergie", unit: "kWh", d: 1, series: [finite(c.bms_energy_kwh).length ? S("bms_energy_kwh", "laut BMS", "--s1") : S("remaining_kwh", "laut Log", "--s1")] },
+      { title: "Verbrauch", unit: "kWh/100 km", d: 1, step: true, series: [S("last_km_kwh_100km", "letzter km", "--s1"), S("trip_kwh_100km", "Fahrt", "--s2")] },
+      { title: "Akkutemperatur", unit: "°C", d: 0, series: [S("battery_temp_min_c", "min", "--s1"), S("battery_temp_max_c", "max", "--s2"), S("battery_inlet_c", "Eingang", "--s3"), S("coolant_inlet_c", "Kühlmittel", "--s4")] },
+      { title: "Außen und innen", unit: "°C", d: 1, series: [S("outside_c", "außen", "--s1"), S("inside_c", "innen", "--s2")] },
+      { title: "Antrieb hinten", unit: "°C", d: 0, series: [S("motor_c", "Motor", "--s1"), S("inverter_c", "Inverter", "--s2"), S("heatsink_c", "Kühlkörper", "--s3")] },
+      { title: "Zellspannung", unit: "V", d: 2, series: [S("cell_v_min", "min", "--s1"), S("cell_v_max", "max", "--s2")] },
+      { title: "Hochvolt-Spannung", unit: "V", d: 1, series: [S("battery_voltage_v", "Akku", "--s1")] },
+      { title: "Akkustrom", unit: "A", d: 1, series: [S("battery_current_a", "Strom", "--s1")], zero: true },
+      { title: "Ladesäule", charge: true, unit: "kW", d: 0, series: [S("evse_max_kw", "bietet höchstens", "--s1")], zero: true },
+      { title: "Säulenstrom", charge: true, unit: "A", d: 0, series: [S("evse_a", "Strom", "--s1")], zero: true },
+      { title: "Ladebuchse", charge: true, unit: "°C", d: 0, series: [S("dc_inlet1_c", "DC 1", "--s1"), S("dc_inlet2_c", "DC 2", "--s2"), S("ac_inlet_c", "AC", "--s3")] },
+      { title: "Reifendruck", unit: "bar", d: 2, series: [S("tire_fl_bar", "VL", "--s1"), S("tire_fr_bar", "VR", "--s2"), S("tire_rl_bar", "HL", "--s3"), S("tire_rr_bar", "HR", "--s4")] },
+      { title: "12-V-Bordnetz", unit: "V", d: 1, series: [S("aux_battery_v", "BMS", "--s1"), S("ldc_out_v", "Wandler", "--s2")] },
+      { title: "12-V-Verbraucher", unit: "kW", d: 2, series: [S("ldc_kw", "Wandler", "--s1")], zero: true },
+      { title: "12-V-Batterie", unit: "%", d: 0, series: [S("aux_soc_pct", "Ladestand", "--s1")] },
+      { title: "Isolationswiderstand", unit: "kΩ", d: 0, series: [S("isolation_kohm", "HV-Akku", "--s1")], zero: true },
+    ];
+  } else if (L.kind === "akku") {
+    list = [
+      { title: "Displayakku", unit: "V", d: 3, series: [S("battery_v", "Spannung", "--s1")] },
+      { title: "Ladestand Displayakku", unit: "%", d: 0, step: true, series: [S("battery_pct", "geschätzt", "--s1")] },
+      { title: "Wachzeit je Aufwachen", unit: "ms", d: 0, dots: true, series: [S("awake_ms", "wach", "--s1")], zero: true },
+    ];
+  } else {
+    list = Object.keys(c).filter((k) => c[k].some(Number.isFinite) && new Set(finite(c[k])).size > 1).slice(0, 16)
+      .map((k) => ({ title: k, unit: "", d: 2, series: [S(k, k, "--s1")] }));
+  }
+  // Ladesaeulen-Werte nur zeigen, wenn wirklich geladen wurde (sonst stehen sie auf 0)
+  const charged = L.summary.charging || max(c.evse_a) > 0 || max(c.evse_max_kw) > 0;
+  return list.filter((sp) => !sp.charge || charged)
+    .map((sp) => ({ ...sp, series: sp.series.filter(has) })).filter((sp) => sp.series.length);
+}
+
+// ---------- Oberfläche ----------
+// Alle bekannten Logs: von GitHub, vom Logger auf diesem Geraet und geoeffnete Dateien.
+// Geladen (und ausgewertet) wird ein Log erst, wenn man es anklickt.
+const catalog = new Map();
+const SRC = { github: "GitHub", device: "Gerät", file: "Datei" };
+function nameTime(name) {
+  const m = name.match(/(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/);
+  return m ? new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime() : NaN;
+}
+const isSide = (name) => /^(diag|akku)_/.test(name);
+function addEntry(name, src, load) {
+  const e = catalog.get(name);
+  if (e) { if (!e.log && load) e.load = load; if (src === "device" || !e.src) e.src = src; return e; }
+  const n = { name, src, load, log: null, t: nameTime(name) };
+  catalog.set(name, n);
+  return n;
+}
+async function openLog(name) {
+  const e = catalog.get(name);
+  if (!e) return;
+  if (!e.log) {
+    $("#sub").textContent = `Lade ${name} …`;
+    try { e.log = parseCSV(await e.load(), name); }
+    catch (err) { $("#sub").textContent = `${name}: ${err.message}`; $("#sub").classList.add("err"); return; }
+    $("#sub").classList.remove("err");
+  }
+  select(e.log);
+}
+function renderFiles() {
+  const box = $("#files");
+  const all = $("#all").checked;
+  const list = [...catalog.values()].filter((e) => all || !isSide(e.name) || e.log === state.cur)
+    .sort((a, b) => (b.t || 0) - (a.t || 0) || b.name.localeCompare(a.name));
+  box.innerHTML = "";
+  let day = null;
+  for (const e of list) {
+    const t = Number.isFinite(e.t) ? e.t : e.log && Number.isFinite(e.log.t0) ? e.log.t0 : NaN;
+    const d = Number.isFinite(t) ? new Date(t).toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "numeric", year: "numeric" }) : "ohne Datum";
+    if (d !== day) { const h = document.createElement("h3"); h.textContent = d; box.appendChild(h); day = d; }
+    const b = document.createElement("button");
+    b.className = "item"; b.type = "button";
+    b.setAttribute("aria-pressed", String(!!e.log && e.log === state.cur));
+    b.innerHTML = "<b></b><i></i><span></span>";
+    const kind = /^diag_/.test(e.name) ? "Diagnose" : /^akku_/.test(e.name) ? "Akku" : "Fahrt";
+    b.querySelector("b").textContent = Number.isFinite(t) ? `${clock(t)} Uhr · ${kind}` : e.name;
+    b.querySelector("i").textContent = SRC[e.src] || "";
+    let info = e.name;
+    if (e.log) {
+      const L = e.log, s = L.summary;
+      info = s.charging ? `Laden · ${fmt(s.charged, 1)} kWh` : L.kind === "drive" ? `${fmt(s.km, 0)} km · ${fmtDur(s.dur)} · ${fmt(s.cons, 1)} kWh/100 km` : L.kind === "akku" ? `Schlaf · ${fmtDur(s.dur)}` : `${L.n} Zeilen`;
+    }
+    b.querySelector("span").textContent = info;
+    b.onclick = () => openLog(e.name);
+    box.appendChild(b);
+  }
+  if (!list.length) box.innerHTML = `<h3>Noch keine Logs</h3>`;
+}
+$("#all").onchange = renderFiles;
+
+function tile(k, v, unit, note) {
+  return `<div class="tile"><span class="k">${k}</span><span class="v">${v}${unit ? `<small>${unit}</small>` : ""}</span>${note ? `<span class="n">${note}</span>` : ""}</div>`;
+}
+
+function renderTiles(L) {
+  const s = L.summary, t = $("#tiles");
+  let h = "";
+  if (L.kind === "drive" && s.charging) {
+    h += tile("Geladen", fmt(s.charged, 1), "kWh");
+    h += tile("Dauer", fmtDur(s.dur), "");
+    h += tile("Ladestand", `${fmt(s.soc0, 1)} → ${fmt(s.soc1, 1)}`, "%");
+    h += tile("Ladeleistung", fmt(-s.pmin, 0), "kW", `im Schnitt ${fmt(s.charged / (s.dur / 3600), 0)} kW`);
+    if (Number.isFinite(s.evseMax)) h += tile("Säule bietet", fmt(s.evseMax, 0), "kW", "höchstens");
+    if (Number.isFinite(s.e1)) h += tile("Restenergie", `${fmt(s.e0, 1)} → ${fmt(s.e1, 1)}`, "kWh", "laut BMS");
+    h += tile("Akkutemperatur", s.tmin === s.tmax ? fmt(s.tmin, 0) : `${fmt(s.tmin, 0)}–${fmt(s.tmax, 0)}`, "°C");
+  } else if (L.kind === "drive") {
+    h += tile("Strecke", fmt(s.km, 0), "km");
+    h += tile("Dauer", fmtDur(s.dur), "");
+    h += tile("Verbrauch", fmt(s.cons, 1), "kWh/100 km");
+    h += tile("Energie", fmt(s.kwh, 2), "kWh", s.regen > 0.05 ? `davon ${fmt(s.regen, 2)} kWh rekuperiert` : "");
+    h += tile("Ladestand", `${fmt(s.soc0, 1)} → ${fmt(s.soc1, 1)}`, "%");
+    h += tile("Spitzenleistung", fmt(s.pmax, 0), "kW", s.pmin < 0 ? `Rekuperation bis ${fmt(-s.pmin, 0)} kW` : "");
+    if (Number.isFinite(s.vmax)) h += tile("Höchstgeschw.", fmt(s.vmax, 0), "km/h", s.vSrc);
+    if (Number.isFinite(s.e1)) h += tile("Restenergie", `${fmt(s.e0, 1)} → ${fmt(s.e1, 1)}`, "kWh", "laut BMS");
+    h += tile("Akkutemperatur", s.tmin === s.tmax ? fmt(s.tmin, 0) : `${fmt(s.tmin, 0)}–${fmt(s.tmax, 0)}`, "°C");
+    if (Number.isFinite(max(L.cols.motor_c))) h += tile("Motor / Inverter", `${fmt(max(L.cols.motor_c), 0)} / ${fmt(max(L.cols.inverter_c), 0)}`, "°C", "höchster Wert, hinten");
+    if (Number.isFinite(s.out1)) h += tile("Außen", s.out0 === s.out1 ? fmt(s.out1, 1) : `${fmt(s.out0, 1)} → ${fmt(s.out1, 1)}`, "°C");
+  }
+  if (L.kind === "drive") {
+    if (Number.isFinite(s.iso)) h += tile("Isolation", s.iso >= 1000 ? fmt(s.iso / 1000, 2) : fmt(s.iso, 0), s.iso >= 1000 ? "MΩ" : "kΩ", s.iso < 100 ? "zu niedrig, bitte prüfen lassen" : "tiefster Wert, in Ordnung");
+    if (s.stats) h += tile("Ladungen AC / DC", `${fmt(s.stats.ac, 0)} / ${fmt(s.stats.dc, 0)}`, "", `${fmt(s.stats.acKwh, 0)} / ${fmt(s.stats.dcKwh, 0)} kWh seit Neu`);
+  } else if (L.kind === "akku") {
+    h += tile("Schlafdauer", fmtDur(s.dur), "");
+    h += tile("Spannung", `${fmt(s.v0, 2)} → ${fmt(s.v1, 2)}`, "V", `tiefster Wert ${fmt(s.vmin, 2)} V`);
+    h += tile("Ladestand", `${fmt(s.p0, 0)} → ${fmt(s.p1, 0)}`, "%");
+    h += tile("Aufwachvorgänge", fmt(s.wakes, 0), "", `im Schnitt ${fmt(s.awake / 1000, 1)} s wach`);
+  } else {
+    h += tile("Zeilen", fmt(L.n, 0), "");
+  }
+  t.innerHTML = h;
+  t.hidden = false;
+}
+
+function select(L) {
+  state.cur = L; state.view = null; state.hover = null;
+  renderFiles(); renderTiles(L);
+  const sub = $("#sub");
+  const what = L.summary.charging ? "Ladevorgang" : L.kind === "drive" ? "Fahrt" : L.kind === "akku" ? "Schlafphase, Displayakku" : "Log";
+  sub.textContent = Number.isFinite(L.t0) ? `${what} vom ${dateStr(L.t0)}, Start ${clock(L.t0)} Uhr` : `${what}, ohne Uhrzeit aufgezeichnet (Zeit ab Start)`;
+  $("#hint").textContent = L.kind === "akku" ? "Ziehen zum Zoomen, Doppelklick zurück" : "Ziehen zum Zoomen, Doppelklick zurück";
+  $("#reset").textContent = L.kind === "akku" ? "Ganze Schlafphase" : L.summary.charging ? "Ganzer Ladevorgang" : "Ganze Fahrt";
+  const box = $("#charts");
+  box.innerHTML = "";
+  state.charts = specs(L).map((sp) => {
+    const el = document.createElement("section");
+    el.className = "chart";
+    el.innerHTML = `<div class="top"><h2></h2><div class="legend"></div></div><canvas></canvas>`;
+    el.querySelector("h2").innerHTML = `<span></span><em></em>`;
+    el.querySelector("h2 span").textContent = sp.title;
+    el.querySelector("h2 em").textContent = sp.unit;
+    const leg = el.querySelector(".legend");
+    const vals = sp.series.map((s) => {
+      const span = document.createElement("span");
+      span.innerHTML = `<i></i><span></span><b></b>`;
+      span.querySelector("i").style.background = `var(${s.color})`;
+      span.querySelector("span").textContent = s.label;
+      leg.appendChild(span);
+      return span.querySelector("b");
+    });
+    box.appendChild(el);
+    const ch = { spec: sp, canvas: el.querySelector("canvas"), vals };
+    bindCanvas(ch);
+    return ch;
+  });
+  $("#bar").hidden = false;
+  $("#empty").hidden = true;
+  drawAll();
+}
+
+// ---------- Zeichnen ----------
+const PAD = { l: 46, r: 10, t: 8, b: 20 };
+function niceStep(range, target) {
+  const raw = range / target, p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p;
+  return (f < 1.5 ? 1 : f < 3 ? 2 : f < 7 ? 5 : 10) * p;
+}
+function timeStep(range, target) {
+  const steps = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400];
+  const raw = range / target;
+  return steps.find((s) => s >= raw) || 86400 * Math.ceil(raw / 86400);
+}
+function viewRange() {
+  const L = state.cur;
+  return state.view || [L.x[0], L.x[L.n - 1] > L.x[0] ? L.x[L.n - 1] : L.x[0] + 1];
+}
+function nearest(x) {
+  const X = state.cur.x;
+  let lo = 0, hi = X.length - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (X[m] < x) lo = m; else hi = m; }
+  return Math.abs(X[lo] - x) <= Math.abs(X[hi] - x) ? lo : hi;
+}
+function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+function drawChart(ch) {
+  const L = state.cur, sp = ch.spec, cv = ch.canvas;
+  const W = cv.clientWidth, H = cv.clientHeight, dpr = window.devicePixelRatio || 1;
+  if (!W) return;
+  if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+  const g = cv.getContext("2d");
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, W, H);
+  const [v0, v1] = viewRange();
+  const X = L.x, pw = W - PAD.l - PAD.r, ph = H - PAD.t - PAD.b;
+  let i0 = 0, i1 = L.n - 1;
+  while (i0 < L.n - 1 && X[i0 + 1] < v0) i0++;
+  while (i1 > 0 && X[i1 - 1] > v1) i1--;
+
+  let lo = Infinity, hi = -Infinity;
+  for (const s of sp.series) for (let i = i0; i <= i1; i++) { const v = s.v[i]; if (Number.isFinite(v)) { if (v < lo) lo = v; if (v > hi) hi = v; } }
+  if (!Number.isFinite(lo)) { lo = 0; hi = 1; }
+  if (sp.zero) { lo = Math.min(lo, 0); hi = Math.max(hi, 0); }
+  if (hi - lo < 1e-9) { const m = Math.abs(lo) * 0.02 || 1; lo -= m; hi += m; }
+  const yStep = niceStep(hi - lo, ph > 110 ? 4 : 3);
+  lo = Math.floor(lo / yStep) * yStep; hi = Math.ceil(hi / yStep) * yStep;
+  const px = (x) => PAD.l + (x - v0) / (v1 - v0) * pw;
+  const py = (y) => PAD.t + (hi - y) / (hi - lo) * ph;
+
+  const cGrid = cssVar("--grid"), cMuted = cssVar("--muted"), cLine = cssVar("--line"), cFg = cssVar("--fg");
+  g.font = `11px ${cssVar("--font-mono")}`;
+  g.textBaseline = "middle";
+  // horizontale Linien und y-Beschriftung
+  const yd = Math.max(0, -Math.floor(Math.log10(yStep) + 1e-9));
+  for (let y = lo; y <= hi + yStep / 2; y += yStep) {
+    const yy = Math.round(py(y)) + 0.5;
+    g.strokeStyle = Math.abs(y) < yStep / 1e6 && lo < 0 ? cLine : cGrid;
+    g.lineWidth = Math.abs(y) < yStep / 1e6 && lo < 0 ? 1.5 : 1;
+    g.beginPath(); g.moveTo(PAD.l, yy); g.lineTo(W - PAD.r, yy); g.stroke();
+    g.fillStyle = cMuted; g.textAlign = "right";
+    g.fillText(fmt(y, Math.min(yd, 3)), PAD.l - 6, yy);
+  }
+  // x-Beschriftung
+  const xr = v1 - v0;
+  const xStep = L.xIsIndex ? niceStep(xr, Math.max(2, Math.floor(pw / 90))) : timeStep(xr, Math.max(2, Math.floor(pw / 90)));
+  let xs = Math.ceil(v0 / xStep) * xStep;
+  if (Number.isFinite(L.t0) && xStep >= 60) { // an glatten Uhrzeiten ausrichten
+    const off = ((L.t0 / 1000) - new Date(L.t0).getTimezoneOffset() * 60) % xStep;
+    xs = Math.ceil((v0 + off) / xStep) * xStep - off;
+  }
+  g.textAlign = "center"; g.textBaseline = "alphabetic"; g.fillStyle = cMuted;
+  for (let x = xs; x <= v1; x += xStep) {
+    const xx = px(x);
+    g.strokeStyle = cGrid; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(Math.round(xx) + 0.5, PAD.t); g.lineTo(Math.round(xx) + 0.5, PAD.t + ph); g.stroke();
+    if (xx > PAD.l + 14 && xx < W - PAD.r - 14) g.fillText(fmtX(L, x, xStep), xx, H - 5);
+  }
+
+  g.save();
+  g.beginPath(); g.rect(PAD.l, PAD.t - 2, pw, ph + 4); g.clip();
+  const path = (s, close) => {
+    const p = new Path2D();
+    let open = false, startX = 0, prevY = 0, lastX = 0, lastI = -1;
+    let lo2 = Math.max(0, i0 - 1), hi2 = Math.min(L.n - 1, i1 + 1);
+    while (lo2 > 0 && !Number.isFinite(s.v[lo2])) lo2--;
+    while (hi2 < L.n - 1 && !Number.isFinite(s.v[hi2])) hi2++;
+    const end = () => {
+      if (open && close) { p.lineTo(lastX, py(0)); p.lineTo(startX, py(0)); p.closePath(); }
+      open = false;
+    };
+    for (let i = lo2; i <= hi2; i++) {
+      const v = s.v[i];
+      if (!Number.isFinite(v)) continue;
+      if (open && X[i] - X[lastI] > s.gap) end();
+      const xx = px(X[i]), yy = py(v);
+      if (!open) { if (close) { p.moveTo(xx, py(0)); p.lineTo(xx, yy); } else p.moveTo(xx, yy); startX = xx; open = true; }
+      else { if (sp.step) p.lineTo(xx, prevY); p.lineTo(xx, yy); }
+      prevY = yy; lastX = xx; lastI = i;
+    }
+    end();
+    return p;
+  };
+  g.lineJoin = "round"; g.lineCap = "round";
+  if (sp.power) {
+    const s = sp.series[0], area = path(s, true), line = path(s, false), z = py(0);
+    for (const [col, top, h] of [[cssVar("--s1"), PAD.t - 2, z - PAD.t + 2], [cssVar("--s3"), z, PAD.t + ph + 2 - z]]) {
+      g.save(); g.beginPath(); g.rect(PAD.l, top, pw, h); g.clip();
+      g.globalAlpha = 0.18; g.fillStyle = col; g.fill(area);
+      g.globalAlpha = 1; g.strokeStyle = col; g.lineWidth = 1.5; g.stroke(line);
+      g.restore();
+    }
+  } else {
+    for (const s of sp.series) {
+      g.strokeStyle = cssVar(s.color); g.fillStyle = g.strokeStyle;
+      if (sp.dots) {
+        for (let i = i0; i <= i1; i++) if (Number.isFinite(s.v[i])) { g.beginPath(); g.arc(px(X[i]), py(s.v[i]), 3, 0, 7); g.fill(); }
+      } else { g.lineWidth = 2; g.stroke(path(s, false)); }
+    }
+  }
+  // Auswahl beim Ziehen
+  if (state.drag && state.drag.ch === ch) {
+    const a = Math.min(state.drag.a, state.drag.b), b = Math.max(state.drag.a, state.drag.b);
+    g.fillStyle = cssVar("--sel"); g.fillRect(a, PAD.t, b - a, ph);
+  }
+  // Fadenkreuz
+  let idx = null;
+  if (state.hover != null && state.hover >= v0 && state.hover <= v1) {
+    idx = nearest(state.hover);
+    const xx = Math.round(px(X[idx])) + 0.5;
+    g.strokeStyle = cMuted; g.lineWidth = 1; g.setLineDash([3, 3]);
+    g.beginPath(); g.moveTo(xx, PAD.t); g.lineTo(xx, PAD.t + ph); g.stroke(); g.setLineDash([]);
+    for (const s of sp.series) {
+      const v = s.v[idx]; if (!Number.isFinite(v)) continue;  // Punkt nur auf echten Messwerten
+      const col = sp.power ? cssVar(v < 0 ? "--s3" : "--s1") : cssVar(s.color);
+      g.beginPath(); g.arc(xx, py(v), 4.5, 0, 7); g.fillStyle = cssVar("--surface"); g.fill();
+      g.beginPath(); g.arc(xx, py(v), 3, 0, 7); g.fillStyle = col; g.fill();
+    }
+  }
+  g.restore();
+  // Werte in der Legende: am Fadenkreuz, sonst der letzte Wert
+  sp.series.forEach((s, k) => {
+    let v = NaN;
+    if (idx != null) for (let i = idx; i >= 0 && X[idx] - X[i] <= s.gap; i--) if (Number.isFinite(s.v[i])) { v = s.v[i]; break; }
+    if (idx == null) { for (let i = i1; i >= i0; i--) if (Number.isFinite(s.v[i])) { v = s.v[i]; break; } }
+    ch.vals[k].textContent = fmt(v, sp.d);
+  });
+  void cFg;
+}
+
+function drawAll() {
+  const L = state.cur;
+  if (!L) return;
+  state.charts.forEach(drawChart);
+  const [v0, v1] = viewRange();
+  $("#reset").hidden = !state.view;
+  let txt;
+  if (state.hover != null) {
+    const i = nearest(state.hover), x = L.x[i];
+    txt = Number.isFinite(L.t0) ? `${clock(L.t0 + x * 1000, true)} Uhr · ` : "";
+    txt += L.xIsIndex ? `Zeile ${i + 1}` : `nach ${fmtDur(x)}`;
+    if (L.cols.odometer_km && Number.isFinite(L.cols.odometer_km[i])) txt += ` · km ${fmt(L.cols.odometer_km[i], 0)}`;
+  } else {
+    txt = L.xIsIndex ? `${L.n} Zeilen` : `${fmtDur(v1 - v0)} ${state.view ? "Ausschnitt" : "gesamt"}`;
+  }
+  $("#cursor").textContent = txt;
+}
+
+let raf = 0;
+const redraw = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; drawAll(); }); };
+
+function bindCanvas(ch) {
+  const cv = ch.canvas;
+  const toX = (e) => {
+    const r = cv.getBoundingClientRect(), [v0, v1] = viewRange();
+    return v0 + (e.clientX - r.left - PAD.l) / (r.width - PAD.l - PAD.r) * (v1 - v0);
+  };
+  cv.addEventListener("pointermove", (e) => {
+    state.hover = toX(e);
+    if (state.drag && state.drag.ch === ch) state.drag.b = e.clientX - cv.getBoundingClientRect().left;
+    redraw();
+  });
+  cv.addEventListener("pointerdown", (e) => {
+    state.hover = toX(e);
+    if (e.pointerType === "mouse" && e.button === 0) {
+      const a = e.clientX - cv.getBoundingClientRect().left;
+      state.drag = { ch, a, b: a, x: toX(e) };
+      cv.setPointerCapture(e.pointerId);
+    }
+    redraw();
+  });
+  cv.addEventListener("pointerup", (e) => {
+    const d = state.drag; state.drag = null;
+    if (d && d.ch === ch && Math.abs(d.b - d.a) > 6) {
+      const x2 = toX(e), a = Math.min(d.x, x2), b = Math.max(d.x, x2);
+      const L = state.cur;
+      state.view = [Math.max(a, L.x[0]), Math.min(b, L.x[L.n - 1])];
+      if (state.view[1] - state.view[0] < 2) state.view = null;
+    }
+    redraw();
+  });
+  cv.addEventListener("pointerleave", (e) => { if (e.pointerType === "mouse" && !state.drag) { state.hover = null; redraw(); } });
+  cv.addEventListener("dblclick", () => { state.view = null; redraw(); });
+}
+
+$("#reset").onclick = () => { state.view = null; redraw(); };
+window.addEventListener("resize", redraw);
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", redraw);
+new MutationObserver(redraw).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+document.fonts && document.fonts.ready.then(redraw);
+
+// ---------- Dateien ----------
+function addLog(L, pick) {
+  const e = addEntry(L.name, "file", null);
+  e.log = L;
+  if (pick) select(L); else renderFiles();
+}
+async function readFiles(list) {
+  let lastLog = null, errs = [];
+  for (const f of list) {
+    try { lastLog = parseCSV(await f.text(), f.name); addLog(lastLog, false); }
+    catch (e) { errs.push(`${f.name}: ${e.message}`); }
+  }
+  if (lastLog) select(lastLog);
+  if (errs.length) { const s = $("#sub"); s.textContent = `Nicht lesbar: ${errs.join(", ")}`; s.classList.add("err"); }
+  else $("#sub").classList.remove("err");
+}
+$("#open").onclick = () => $("#file").click();
+$("#file").onchange = (e) => { readFiles([...e.target.files]); e.target.value = ""; };
+let dragDepth = 0;
+document.addEventListener("dragenter", (e) => { if ([...(e.dataTransfer?.types || [])].includes("Files")) { dragDepth++; $("#drop").hidden = false; } });
+document.addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; $("#drop").hidden = true; } });
+document.addEventListener("dragover", (e) => e.preventDefault());
+document.addEventListener("drop", (e) => {
+  e.preventDefault(); dragDepth = 0; $("#drop").hidden = true;
+  const fs = [...(e.dataTransfer?.files || [])].filter((f) => /\.csv$/i.test(f.name) || f.type.includes("csv"));
+  if (fs.length) readFiles(fs);
+});
+
+// ---------- Aufzeichnungen des Loggers auf diesem Geraet (IndexedDB) ----------
+function deviceLogs() {
+  return new Promise((res) => {
+    let q;
+    try { q = indexedDB.open("ioniq6-logger", 1); } catch { return res([]); }
+    q.onupgradeneeded = () => q.result.createObjectStore("logs", { keyPath: "name" });
+    q.onerror = () => res([]);
+    q.onsuccess = () => {
+      const g = q.result.transaction("logs").objectStore("logs").getAll();
+      g.onsuccess = () => res(g.result || []);
+      g.onerror = () => res([]);
+    };
+  });
+}
+
+// ---------- ESP-Logs aus dem privaten Repo (GitHub-API mit eigenem Schluessel) ----------
+const REPO = "Darshumar/Ioniq6_obd", LOG_DIR = "logs/esp32";
+const getToken = () => { try { return localStorage.getItem("gh_token") || ""; } catch { return ""; } };
+async function gh(path, raw) {
+  const r = await fetch(`https://api.github.com/repos/${REPO}/contents/${path}`, {
+    headers: { Authorization: `Bearer ${getToken()}`, Accept: raw ? "application/vnd.github.raw" : "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" },
+    cache: "no-store",
+  });
+  if (!r.ok) throw new Error(r.status === 401 ? "Schlüssel ungültig oder abgelaufen" : r.status === 404 || r.status === 403 ? "Schlüssel hat keinen Zugriff auf Ioniq6_obd" : `GitHub antwortet ${r.status}`);
+  return raw ? r.text() : r.json();
+}
+async function loadGithub() {
+  const st = $("#ghstate");
+  if (!getToken()) { st.textContent = "Kein Schlüssel gespeichert."; $("#ghbox").open = true; return; }
+  st.textContent = "Lade Liste von GitHub …";
+  try {
+    const items = await gh(LOG_DIR, false);
+    const csv = items.filter((i) => i.type === "file" && /\.csv$/i.test(i.name));
+    csv.forEach((i) => addEntry(i.name, "github", () => gh(i.path, true)));
+    st.textContent = `${csv.length} Logs auf GitHub gefunden.`;
+  } catch (e) { st.textContent = e.message; $("#ghbox").open = true; }
+}
+$("#token").value = getToken();
+$("#saveToken").onclick = async () => {
+  try { localStorage.setItem("gh_token", $("#token").value.trim()); } catch {}
+  await loadGithub(); renderFiles();
+};
+
+async function loadAll() {
+  for (const f of await deviceLogs()) addEntry(f.name, "device", async () => f.text);
+  await loadGithub();
+  renderFiles();
+}
+$("#reload").onclick = loadAll;
+
+// Die neuesten Fahrten im Hintergrund auswerten, damit die Liste Strecke und
+// Verbrauch zeigt und nicht ein Kurz-Log von wenigen Sekunden vorne steht
+async function prefetch(n) {
+  const todo = [...catalog.values()].filter((e) => !e.log && !isSide(e.name)).sort((a, b) => (b.t || 0) - (a.t || 0)).slice(0, n);
+  for (const e of todo) {
+    try { e.log = parseCSV(await e.load(), e.name); } catch { /* bleibt ungeladen */ }
+    renderFiles();
+  }
+}
+(async () => {
+  await loadAll();
+  const want = new URLSearchParams(location.search).get("f");
+  if (want && catalog.get(want)) { await openLog(want); prefetch(15); return; }
+  $("#sub").textContent = "Lade die letzten Fahrten …";
+  await prefetch(15);
+  const drives = [...catalog.values()].filter((e) => !isSide(e.name)).sort((a, b) => (b.t || 0) - (a.t || 0));
+  const first = drives.find((e) => e.log && e.log.summary.dur > 120) || drives[0];
+  if (first) await openLog(first.name);
+  else { $("#sub").textContent = "Fahrten vom ESP-Display und vom Logger als Diagramme"; $("#empty").hidden = false; }
+})();
+
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+</script>
+</body>
+</html>

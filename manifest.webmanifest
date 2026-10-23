@@ -1,0 +1,20 @@
+{
+  "name": "Ioniq 6",
+  "short_name": "Ioniq 6",
+  "description": "Akku- und Fahrdaten des Ioniq 6 live auslesen und Logs ansehen",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0e1216",
+  "theme_color": "#0e1216",
+  "lang": "de",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Logs", "url": "logs.html" }
+  ]
+}
