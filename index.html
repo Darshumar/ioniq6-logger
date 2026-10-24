@@ -280,7 +280,6 @@ function d7E3(p, v) {
   const d = p.slice(3);
   v.motor = s16(u16le(d, 25)) / 100;
   v.inverter = s16(u16le(d, 27)) / 100;
-  v.ignV = u16le(d, 15) / 1000;  // Zuendspannung (OBDb IONIQ6_IGN_VOLTAGE)
   return true;
 }
 function d7B3(p, v) {
@@ -298,18 +297,11 @@ function dCells(p, block, cells) {
   return true;
 }
 // 12-V-Batterie und Wandler (7E5 22E011), wie decode_7E5
-// Zustand: Hauptrelais (744 22E004, Byte 4 Bit 2; faellt am Ende des Ladens auf 0)
-// und Fahrstufe (7E2 2101, OBDb, am Auto noch nicht geprueft)
+// Ready: Hauptrelais (744 22E004, Byte 4 Bit 2). Am 24.10. die ganze Fahrt 1; nach dem
+// Ausschalten antwortet 744 nicht mehr, waehrend das BMS noch eine Weile Strom 0 meldet.
 function d744(p, v) {
   if (!ok(p, 0xe0, 0x04, 3 + 5)) return false;
   v.relay = (p[3 + 4] >> 2) & 1;
-  return true;
-}
-const GEARS = ["P", "R", "N", "D"];
-function dGear(p, v) {
-  if (!p || p.length < 6 || p[0] !== 0x61 || p[1] !== 0x01) return false;
-  const b = p[2 + 5] & 0x0f;
-  v.gear = [1, 2, 4, 8].includes(b) ? GEARS[Math.log2(b)] : "?";
   return true;
 }
 function d7E5(p, v) {
@@ -330,7 +322,7 @@ const COLS = ["time", "uptime_s", "soc_bms_pct", "soc_display_pct", "soh_pct", "
   "last_km_kwh_100km", "tire_fl_bar", "tire_fl_c", "tire_fr_bar", "tire_fr_c", "tire_rl_bar", "tire_rl_c", "tire_rr_bar",
   "tire_rr_c", "raw_220101", "raw_220105", "raw_220106", "raw_22C00B", "raw_7E2_22E004", "raw_7B3_220100",
   "raw_744_22E002", "raw_744_22E004", "raw_220111", "raw_7E3_22E001", "raw_744_22E003", "raw_7E5_22E011",
-  "raw_7E5_22E002", ...CELL_DIDS.map((d) => `raw_${d}`), "raw_7E2_2101"];
+  "raw_7E5_22E002", ...CELL_DIDS.map((d) => `raw_${d}`), "ready"];
 const DEC = { soc_bms_pct: 1, soc_display_pct: 1, soh_pct: 1, remaining_kwh: 1, battery_voltage_v: 1, battery_current_a: 1,
   battery_power_kw: 2, cell_v_min: 2, cell_v_max: 2, aux_battery_v: 1, cum_charged_kwh: 1, charge_limit_kw: 2,
   charge_request_a: 1, discharge_limit_kw: 2, trip_kwh: 2, trip_kwh_100km: 1, last_km_kwh_100km: 1,
@@ -481,9 +473,6 @@ async function run() {
       const pv = await query("22E004", "7EA", 1, 1500);
       veh.speed = NaN;
       if (pv && d7E2(pv, veh)) r.raw_7E2_22E004 = hex(pv);
-      veh.gear = undefined;
-      const pg = await query("2101", "7EA", 1, 1500);
-      if (pg && dGear(pg, veh)) r.raw_7E2_2101 = hex(pg);
       if (cycle % 5 === 1) {
         await target("7B3");
         const pc = await query("220100", "7BB", 1, 1500);
@@ -499,15 +488,17 @@ async function run() {
         const pa = await query("22E011", "7ED", 1, 1500);
         if (pa && d7E5(pa, veh)) r.raw_7E5_22E011 = hex(pa);
       }
-      if (charging || cycle % 5 === 1) {
-        // Ladesteuergeraet: 22E004 immer (Hauptrelais), die Ladewerte nur beim Laden
-        await target("744");
-        for (const did of charging ? ["22E002", "22E003", "22E004"] : ["22E004"]) {
-          const pl = await query(did, "74C", 1, 1500);
-          if (pl) r[`raw_744_${did}`] = hex(pl);
-          if (did === "22E004") d744(pl, veh);
-        }
+      // Ladesteuergeraet: 22E004 in jedem Zyklus (Hauptrelais = Ready), Ladewerte nur beim Laden
+      await target("744");
+      veh.relay = 0;
+      for (const did of charging ? ["22E002", "22E003", "22E004"] : ["22E004"]) {
+        const pl = await query(did, "74C", 1, 1000);
+        if (!pl) continue;
+        if (did === "22E004") { d744(pl, veh); if (cycle % 5 === 1 || charging) r[`raw_744_${did}`] = hex(pl); }
+        else r[`raw_744_${did}`] = hex(pl);
       }
+      r.ready = veh.relay;
+      veh.charging = charging;
       if (charging) {
         // Bordlader (AC-Laden); beim DC-Laden antwortet er einfach nicht
         await target("7E5");
@@ -560,24 +551,26 @@ async function run() {
       fails++;
       setState(fails > 3 ? "Auto antwortet nicht (aus?)" : "Abfrage fehlgeschlagen, neuer Versuch", "err");
       if (!elm.connected) break;
-      // Akku schweigt: nachsehen, ob die Zuendung noch an ist (Inverter, Fahrstufe).
-      // Antwortet eines davon, kommt eine Zeile ohne Akkuwerte ins Log.
+      // Akku schweigt: nachsehen, ob noch andere Steuergeraete wach sind (Inverter,
+      // Ladesteuergeraet). Antwortet eines davon, kommt eine Zeile ohne Akkuwerte ins Log.
       if (fails >= 2 && fails % 3 === 2) {
         const z = {};
         await target("7E3");
         const pi = await query("22E001", "7EB", 1, 1500);
         if (pi && d7E3(pi, veh)) z.raw_7E3_22E001 = hex(pi);
-        await target("7E2");
-        const pg = await query("2101", "7EA", 1, 1500);
-        if (pg && dGear(pg, veh)) z.raw_7E2_2101 = hex(pg);
+        await target("744");
+        const pl = await query("22E004", "74C", 1, 1500);
+        veh.relay = 0;
+        if (pl && d744(pl, veh)) z.raw_744_22E004 = hex(pl);
         await target("7E4");
         if (Object.keys(z).length) {
           z.time = isoLocal(new Date());
           z.uptime_s = (performance.now() - t0) / 1000;
+          z.ready = veh.relay;
           L.lines.push(csvLine(z));
           setState("Zündung an, Akku antwortet nicht", "err");
           $("#rec").textContent = `Aufzeichnung ${L.name} · ${L.lines.length - 1} Zeilen`;
-          showState(veh, false);
+          showState(veh);
         }
       }
     }
@@ -589,12 +582,11 @@ async function run() {
   renderFiles();
 }
 
-function showState(veh, hv) {
-  const small = [veh.gear, Number.isFinite(veh.ignV) ? `${fmt(veh.ignV, 1)} V` : ""].filter(Boolean).join(" · ");
-  $("#t_state").innerHTML = `${hv === undefined ? "–" : hv ? "HV an" : "HV aus"}<small>${small}</small>`;
+function showState(veh) {
+  $("#t_state").innerHTML = veh.relay ? (veh.charging ? "Laden" : "Ready") : "aus<small>Hochvolt</small>";
 }
 function show(r, veh, cells) {
-  if (veh.relay !== undefined || veh.gear) showState(veh, veh.relay === undefined ? undefined : veh.relay === 1);
+  showState(veh);
   const cv = cells.filter(Number.isFinite);
   if (cv.length) {
     const lo = Math.min(...cv), hi = Math.max(...cv);

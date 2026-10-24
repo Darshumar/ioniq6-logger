@@ -244,11 +244,6 @@ const DECODERS = [
     o.motor_c = S(U16LE(d, 25)) / 100; o.inverter_c = S(U16LE(d, 27)) / 100; o.heatsink_c = S(U16LE(d, 56)) / 100;
     o.ign_v = U16LE(d, 15) / 1000;
   } },
-  // Fahrstufe (Dienst 21, Antwort 61 01; OBDb, am Auto noch nicht geprueft): 0=P 1=R 2=N 3=D
-  { cols: ["raw_7E2_2101"], svc: 0x61, id: [0x01], min: 8, f: (d, o) => {
-    const b = d[5] & 0x0f;
-    if ([1, 2, 4, 8].includes(b)) o.gear = Math.log2(b);
-  } },
   { cols: ["raw_7B3_220100"], id: [0x01, 0x00], min: 10, f: (d, o) => { o.inside_c = d[5] / 2 - 40; o.outside_c = d[6] / 2 - 40; } },
   { cols: ["raw_744_22E002"], id: [0xE0, 0x02], min: 30, f: (d, o) => {
     o.evse_v = U16(d, 17) / 10; o.evse_a = U16(d, 19) / 10; o.evse_max_kw = U16(d, 25) / 100;
@@ -424,16 +419,14 @@ function specs(L) {
       { title: "Zellspannung", unit: "V", d: 2, series: [S("cell_v_min", "min", "--s1"), S("cell_v_max", "max", "--s2")] },
       { title: "Zellen (alle Blöcke)", unit: "V", d: 2, series: [S("cells_min_v", "niedrigste", "--s1"), S("cells_max_v", "höchste", "--s2")] },
       { title: "Zellspreizung", unit: "mV", d: 0, series: [S("cells_spread_mv", "max − min", "--s1")], zero: true },
-      { title: "Hochvoltrelais", unit: "1 = an", d: 0, step: true, series: [S("hv_relay", "Hauptrelais", "--s1")], zero: true },
-      { title: "Zündspannung", unit: "V", d: 1, series: [S("ign_v", "Inverter", "--s1")] },
-      { title: "Fahrstufe", unit: "0 P · 1 R · 2 N · 3 D", d: 0, step: true, series: [S("gear", "Stufe", "--s1")], zero: true },
+      { title: "Ready", unit: "1 = Hochvolt an", d: 0, step: true, series: [finite(c.ready).length ? S("ready", "Hauptrelais", "--s1") : S("hv_relay", "Hauptrelais", "--s1")], zero: true },
       { title: "Hochvolt-Spannung", unit: "V", d: 1, series: [S("battery_voltage_v", "Akku", "--s1")] },
       { title: "Akkustrom", unit: "A", d: 1, series: [S("battery_current_a", "Strom", "--s1")], zero: true },
       { title: "Ladesäule", charge: true, unit: "kW", d: 0, series: [S("evse_max_kw", "bietet höchstens", "--s1")], zero: true },
       { title: "Säulenstrom", charge: true, unit: "A", d: 0, series: [S("evse_a", "Strom", "--s1")], zero: true },
       { title: "Ladebuchse", charge: true, unit: "°C", d: 0, series: [S("dc_inlet1_c", "DC 1", "--s1"), S("dc_inlet2_c", "DC 2", "--s2"), S("ac_inlet_c", "AC", "--s3")] },
       { title: "Reifendruck", unit: "bar", d: 2, series: [S("tire_fl_bar", "VL", "--s1"), S("tire_fr_bar", "VR", "--s2"), S("tire_rl_bar", "HL", "--s3"), S("tire_rr_bar", "HR", "--s4")] },
-      { title: "12-V-Bordnetz", unit: "V", d: 1, series: [S("aux_battery_v", "BMS", "--s1"), S("ldc_out_v", "Wandler", "--s2"), S("aux_v", "Batterie", "--s3")] },
+      { title: "12-V-Bordnetz", unit: "V", d: 1, series: [S("aux_battery_v", "BMS", "--s1"), S("ldc_out_v", "Wandler", "--s2"), S("aux_v", "Batterie", "--s3"), S("ign_v", "Inverter", "--s4")] },
       { title: "12-V-Verbraucher", unit: "kW", d: 2, series: [S("ldc_kw", "Wandler", "--s1")], zero: true },
       { title: "12-V-Batterie", unit: "%", d: 0, series: [S("aux_soc_pct", "Ladestand", "--s1")] },
       { title: "12-V-Batteriestrom", unit: "A", d: 1, series: [S("aux_current_a", "Strom", "--s1")], zero: true },
