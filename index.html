@@ -322,7 +322,7 @@ const COLS = ["time", "uptime_s", "soc_bms_pct", "soc_display_pct", "soh_pct", "
   "last_km_kwh_100km", "tire_fl_bar", "tire_fl_c", "tire_fr_bar", "tire_fr_c", "tire_rl_bar", "tire_rl_c", "tire_rr_bar",
   "tire_rr_c", "raw_220101", "raw_220105", "raw_220106", "raw_22C00B", "raw_7E2_22E004", "raw_7B3_220100",
   "raw_744_22E002", "raw_744_22E004", "raw_220111", "raw_7E3_22E001", "raw_744_22E003", "raw_7E5_22E011",
-  "raw_7E5_22E002", ...CELL_DIDS.map((d) => `raw_${d}`), "ready"];
+  "raw_7E5_22E002", ...CELL_DIDS.map((d) => `raw_${d}`), "ready", "car_state"];
 const DEC = { soc_bms_pct: 1, soc_display_pct: 1, soh_pct: 1, remaining_kwh: 1, battery_voltage_v: 1, battery_current_a: 1,
   battery_power_kw: 2, cell_v_min: 2, cell_v_max: 2, aux_battery_v: 1, cum_charged_kwh: 1, charge_limit_kw: 2,
   charge_request_a: 1, discharge_limit_kw: 2, trip_kwh: 2, trip_kwh_100km: 1, last_km_kwh_100km: 1,
@@ -499,6 +499,9 @@ async function run() {
       }
       r.ready = veh.relay;
       veh.charging = charging;
+      // Zustand (24.10. am Auto gesehen): Zuendung ohne Ready = Akku antwortet, Relais aus,
+      // Fahrzeugsteuerung 7E2 schweigt. Kurz nach dem Ausschalten antwortet 7E2 noch -> aus.
+      r.car_state = veh.state = veh.relay ? (charging ? 3 : 2) : (pv ? 0 : 1);
       if (charging) {
         // Bordlader (AC-Laden); beim DC-Laden antwortet er einfach nicht
         await target("7E5");
@@ -567,6 +570,7 @@ async function run() {
           z.time = isoLocal(new Date());
           z.uptime_s = (performance.now() - t0) / 1000;
           z.ready = veh.relay;
+          z.car_state = veh.state = 0;
           L.lines.push(csvLine(z));
           setState("Zündung an, Akku antwortet nicht", "err");
           $("#rec").textContent = `Aufzeichnung ${L.name} · ${L.lines.length - 1} Zeilen`;
@@ -582,8 +586,9 @@ async function run() {
   renderFiles();
 }
 
+const STATES = ["aus", "Zündung", "Ready", "Laden"];
 function showState(veh) {
-  $("#t_state").innerHTML = veh.relay ? (veh.charging ? "Laden" : "Ready") : "aus<small>Hochvolt</small>";
+  $("#t_state").textContent = STATES[veh.state ?? 0];
 }
 function show(r, veh, cells) {
   showState(veh);

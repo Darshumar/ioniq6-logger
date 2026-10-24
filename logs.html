@@ -419,7 +419,9 @@ function specs(L) {
       { title: "Zellspannung", unit: "V", d: 2, series: [S("cell_v_min", "min", "--s1"), S("cell_v_max", "max", "--s2")] },
       { title: "Zellen (alle Blöcke)", unit: "V", d: 2, series: [S("cells_min_v", "niedrigste", "--s1"), S("cells_max_v", "höchste", "--s2")] },
       { title: "Zellspreizung", unit: "mV", d: 0, series: [S("cells_spread_mv", "max − min", "--s1")], zero: true },
-      { title: "Ready", unit: "1 = Hochvolt an", d: 0, step: true, series: [finite(c.ready).length ? S("ready", "Hauptrelais", "--s1") : S("hv_relay", "Hauptrelais", "--s1")], zero: true },
+      finite(c.car_state).length
+        ? { title: "Zustand", unit: "0 aus · 1 Zündung · 2 Ready · 3 Laden", d: 0, step: true, series: [S("car_state", "Zustand", "--s1")], zero: true }
+        : { title: "Ready", unit: "1 = Hochvolt an", d: 0, step: true, series: [finite(c.ready).length ? S("ready", "Hauptrelais", "--s1") : S("hv_relay", "Hauptrelais", "--s1")], zero: true },
       { title: "Hochvolt-Spannung", unit: "V", d: 1, series: [S("battery_voltage_v", "Akku", "--s1")] },
       { title: "Akkustrom", unit: "A", d: 1, series: [S("battery_current_a", "Strom", "--s1")], zero: true },
       { title: "Ladesäule", charge: true, unit: "kW", d: 0, series: [S("evse_max_kw", "bietet höchstens", "--s1")], zero: true },
