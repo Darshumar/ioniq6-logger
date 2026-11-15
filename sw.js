@@ -1,7 +1,7 @@
 // Haelt die App offline verfuegbar. Seiten kommen zuerst aus dem Netz (damit
 // Updates sofort ankommen), ohne Netz aus dem Zwischenspeicher. GitHub-API und
 // Schriften werden nie zwischengespeichert.
-const CACHE = "ioniq6-v1";
+const CACHE = "ioniq6-v2";
 const SHELL = ["./", "index.html", "logs.html", "manifest.webmanifest", "icon-192.png", "icon-512.png", "icon-180.png"];
 
 self.addEventListener("install", (e) => {
