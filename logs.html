@@ -105,6 +105,13 @@ code { font-family: var(--font-mono); font-size: .9em; }
 .gh .row { display: flex; gap: 6px; }
 .gh p { margin: 0; color: var(--muted); }
 .gh a { color: var(--accent); }
+.item i.dc { color: var(--s2); border-color: currentColor; }
+.item i.ac { color: var(--s3); border-color: currentColor; }
+.list h3 small { text-transform: none; letter-spacing: 0; font-size: .75rem; margin-left: 4px; }
+.sum { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: grid; gap: 2px; font-size: .85rem; }
+.sum b { font-family: var(--font-display); font-weight: 500; font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+.sum span { color: var(--muted); }
+.chart.xy canvas { height: 240px; }
 @media (max-width: 900px) {
   .layout { grid-template-columns: minmax(0, 1fr); }
   .side { position: static; max-height: none; }
@@ -120,7 +127,7 @@ code { font-family: var(--font-mono); font-size: .9em; }
       <h1>Ioniq 6 Logs</h1>
       <p class="sub" id="sub">Fahrten vom ESP-Display und vom Logger als Diagramme</p>
     </div>
-    <nav class="nav" aria-label="Bereiche"><a href="./">Live</a><a href="logs.html" aria-current="page">Logs</a></nav>
+    <nav class="nav" aria-label="Bereiche"><a href="./">Live</a><a href="logs.html" id="navLogs" aria-current="page">Logs</a><a href="logs.html#laden" id="navCharge">Laden</a></nav>
   </header>
 
   <div class="layout">
@@ -130,7 +137,8 @@ code { font-family: var(--font-mono); font-size: .9em; }
       <button type="button" id="reload">Aktualisieren</button>
       <input type="file" id="file" accept=".csv,text/csv" multiple hidden>
     </div>
-    <label class="opts"><input type="checkbox" id="all"> auch Diagnose- und Akku-Logs</label>
+    <label class="opts" id="allBox"><input type="checkbox" id="all"> auch Diagnose- und Akku-Logs</label>
+    <div class="sum" id="chargeSum" hidden></div>
     <div class="list" id="files" role="group" aria-label="Logs"></div>
     <details class="gh" id="ghbox">
       <summary>GitHub-Zugang</summary>
@@ -215,11 +223,18 @@ function parseCSV(text, name) {
   decodeRaw(cols, strs, n);
   if (kind === "drive" && cols.motor1_rpm) cols.speed_kmh = cols.motor1_rpm.map((r) => Math.abs(r) * 60 / REV_PER_KM);
   if (cols.vcu_speed_kmh) cols.vcu_speed_abs = cols.vcu_speed_kmh.map(Math.abs);
+  // Ladeleistung positiv; Saeulenleistung aus Spannung und Strom der Ladesaeule (744 22E002)
+  if (cols.battery_power_kw) cols.charge_kw = cols.battery_power_kw.map((v) => -v);
+  if (cols.evse_v && cols.evse_a) cols.evse_kw = cols.evse_v.map((v, i) => {
+    const a = cols.evse_a[i];
+    return v > 0 && v < 1200 && a >= 0 && a < 700 ? v * a / 1000 : NaN;
+  });
   // Luecke im Log (Verbindung weg): Linie dort unterbrechen
   const dts = x.slice(1).map((v, i) => v - x[i]).filter((d) => d > 0).sort((a, b) => a - b);
   const gap = Math.max(30, 5 * (dts[dts.length >> 1] || 0));
   const log = { name, kind, n, x, t0, cols, strs, gap, xIsIndex: !base && !Number.isFinite(t0) };
   log.summary = summarize(log);
+  log.charges = chargeRuns(log);
   return log;
 }
 
@@ -388,7 +403,7 @@ function fmtX(L, x, step) {
 }
 
 // ---------- Diagramm-Beschreibung ----------
-function specs(L) {
+function specs(L, ch) {
   const c = L.cols;
   const S = (key, label, color) => {
     const v = c[key];
@@ -402,7 +417,9 @@ function specs(L) {
     }
     return { key, label, color, v, gap };
   };
-  const has = (s) => s.v && s.v.some(Number.isFinite);
+  // in der Ladeansicht zaehlen nur Werte innerhalb der Ladung
+  const r0 = ch ? L.x.findIndex((v) => v >= ch.x0) : 0, r1 = ch ? L.x.findIndex((v) => v >= ch.x1) : L.n - 1;
+  const has = (s) => s.v && s.v.slice(r0, r1 + 1).some(Number.isFinite);
   let list;
   if (L.kind === "drive") {
     list = [
@@ -445,10 +462,321 @@ function specs(L) {
     list = Object.keys(c).filter((k) => c[k].some(Number.isFinite) && new Set(finite(c[k])).size > 1).slice(0, 16)
       .map((k) => ({ title: k, unit: "", d: 2, series: [S(k, k, "--s1")] }));
   }
+  if (ch && L.kind === "drive") {
+    const keep = ["Ladestand", "Restenergie", "Akkutemperatur", "Zellen (alle Blöcke)", "Zellspreizung", "Hochvolt-Spannung", "Akkustrom",
+      "Ladesäule", "Säulenstrom", "Ladebuchse", "Bordlader (AC)", "Außen und innen", "12-V-Bordnetz"];
+    list = [
+      { title: "Ladeleistung", unit: "kW", d: 1, series: [S("charge_kw", "Akku", "--s1"), S("evse_kw", "Säule", "--s2")], zero: true },
+      ...keep.map((t) => list.find((sp) => sp.title === t)).filter(Boolean).map((sp) => ({ ...sp, charge: false })),
+      { title: "Kühlmittelpumpe", unit: "Rohwert", d: 0, step: true, series: [S("coolant_pump_raw", "Pumpe", "--s1")], zero: true },
+    ];
+  }
   // Ladesaeulen-Werte nur zeigen, wenn wirklich geladen wurde (sonst stehen sie auf 0)
   const charged = L.summary.charging || max(c.evse_a) > 0 || max(c.evse_max_kw) > 0;
   return list.filter((sp) => !sp.charge || charged)
     .map((sp) => ({ ...sp, series: sp.series.filter(has) })).filter((sp) => sp.series.length);
+}
+
+// ---------- Ladevorgaenge ----------
+// Eine Ladung ist ein Abschnitt mit Zustand 3 (car_state, ab ESP-Firmware 70). Aeltere Logs ohne
+// diese Spalte: Akku nimmt mehr als 1 kW auf und der Motor steht. Kurze Aussetzer bis 90 s
+// gehoeren noch zur selben Ladung.
+const CH_GAP_S = 90, CH_MIN_S = 60, CH_MIN_KWH = 0.3, CH_DC_KW = 12;
+function chargeRuns(L) {
+  const c = L.cols, X = L.x, pw = c.battery_power_kw;
+  if (L.kind !== "drive" || !pw) return [];
+  const st = finite(c.car_state).length ? c.car_state : null, rpm = c.motor1_rpm;
+  const on = (i) => (st ? st[i] === 3 : pw[i] < -1 && !(Math.abs(rpm ? rpm[i] : 0) > 5));
+  const runs = [];
+  let a = -1, b = -1;
+  for (let i = 0; i < L.n; i++) {
+    if (!on(i)) continue;
+    if (a >= 0 && X[i] - X[b] <= CH_GAP_S) b = i;
+    else { if (a >= 0) runs.push([a, b]); a = b = i; }
+  }
+  if (a >= 0) runs.push([a, b]);
+  return runs.map(([i0, i1]) => chargeInfo(L, i0, i1)).filter((s) => s.dur >= CH_MIN_S && s.kwh >= CH_MIN_KWH);
+}
+function chargeInfo(L, i0, i1) {
+  const c = L.cols, sl = (a) => (a ? a.slice(i0, i1 + 1) : []);
+  const x = L.x.slice(i0, i1 + 1), p = sl(c.charge_kw), soc = sl(c.soc_display_pct);
+  const dur = x[x.length - 1] - x[0];
+  const kwh = integrate(x, p, (m) => m > 0);
+  // die Saeule wird nicht in jeder Zeile abgefragt: nur ueber vorhandene Werte integrieren
+  const ev = sl(c.evse_kw), ex = [], evv = [];
+  ev.forEach((v, k) => { if (Number.isFinite(v)) { ex.push(x[k]); evv.push(v); } });
+  const evseKwh = integrate(ex, evv, (m) => m > 0);
+  const pmax = max(p);
+  // Akkuheizung: Zeit mit "Heizung an" in der Spalte battery_thermal
+  const th = (L.strs.battery_thermal || []).slice(i0, i1 + 1);
+  let heatS = 0;
+  for (let k = 1; k < x.length; k++) if (/^Heiz/.test(th[k] || "")) heatS += Math.min(x[k] - x[k - 1], 30);
+  // Ladekurve: mittlere Leistung je Prozent Ladestand (fuer den Vergleich mit anderen Ladungen)
+  const bins = new Map();
+  soc.forEach((s, k) => {
+    if (!Number.isFinite(s) || !Number.isFinite(p[k]) || p[k] <= 0) return;
+    const b = Math.round(s), o = bins.get(b) || [0, 0];
+    o[0] += p[k]; o[1]++; bins.set(b, o);
+  });
+  const curve = [...bins].sort((u, v) => u[0] - v[0]).map(([b, [sum, n]]) => [b, Math.round(sum / n * 10) / 10]);
+  // Zeit von 10 (bzw. 20) auf 80 %
+  const at = (lvl) => { const k = soc.findIndex((v) => v >= lvl); return k >= 0 ? x[k] : NaN; };
+  const s0 = first(soc), s1 = last(soc);
+  const from = s0 <= 10.5 ? 10 : s0 <= 20.5 ? 20 : NaN;
+  const fast = Number.isFinite(from) && s1 >= 80 ? { from, s: at(80) - (s0 >= from ? x[0] : at(from)) } : null;
+  return {
+    name: L.name, x0: L.x[i0], x1: L.x[i1], start: Number.isFinite(L.t0) ? L.t0 + L.x[i0] * 1000 : NaN,
+    dur, kwh, pmax, pavg: dur > 0 ? kwh / (dur / 3600) : NaN, dc: pmax >= CH_DC_KW,
+    soc0: s0, soc1: s1, e0: first(sl(c.bms_energy_kwh)), e1: last(sl(c.bms_energy_kwh)),
+    evseKwh: evseKwh > 0.1 ? evseKwh : NaN, evseMax: max(sl(c.evse_max_kw)),
+    t0: first(sl(c.battery_temp_min_c)), t1: last(sl(c.battery_temp_min_c)),
+    tmin: min(sl(c.battery_temp_min_c)), tmax: max(sl(c.battery_temp_max_c)),
+    heatS, curve, fast, odo: last(sl(c.odometer_km)), out: first(sl(c.outside_c)),
+  };
+}
+
+// Gefundene Ladungen je Log merken (nur auf diesem Geraet), damit die Ladeliste nicht bei jedem
+// Oeffnen alle Logs von GitHub laedt. Ein Log wird neu durchsucht, wenn sich die Datei aendert.
+const CH_CACHE = "ioniq6_charges_v2";
+let chCache = {};
+try { chCache = JSON.parse(localStorage.getItem(CH_CACHE) || "{}") || {}; } catch { chCache = {}; }
+function saveChCache() { try { localStorage.setItem(CH_CACHE, JSON.stringify(chCache)); } catch {} }
+function setCharges(e) {
+  e.charges = e.log ? e.log.charges : [];
+  if (e.key) chCache[e.name] = { k: e.key, c: e.charges };
+}
+let scanning = null;
+function scanCharges() {
+  if (scanning) return scanning;
+  const todo = [];
+  for (const e of catalog.values()) {
+    if (isSide(e.name) || e.charges) continue;
+    if (e.log) { setCharges(e); continue; }
+    const hit = e.key && chCache[e.name];
+    if (hit && hit.k === e.key) e.charges = hit.c;
+    else if (e.load) todo.push(e);
+  }
+  todo.sort((a, b) => (b.t || 0) - (a.t || 0));
+  const total = todo.length;
+  let done = 0, last = 0;
+  const tick = (force) => {
+    state.scan = done < total ? { done, total } : null;
+    if (force || Date.now() - last > 400) { last = Date.now(); if (state.mode === "charge") renderFiles(); }
+    // erste gefundene (neueste) Ladung gleich zeigen, nicht erst nach der ganzen Suche
+    if (state.mode === "charge" && !state.charge && !state.opening) {
+      const n = allCharges()[0];
+      if (n) { state.opening = true; openCharge(n).finally(() => { state.opening = false; }); }
+    }
+  };
+  const worker = async () => {
+    for (let e; (e = todo.shift()); ) {
+      try {
+        e.log = parseCSV(await e.load(), e.name);
+        setCharges(e);
+        if (!e.charges.length && e.log !== state.cur) e.log = null; // Speicher sparen
+      } catch { e.charges = []; }
+      done++;
+      tick(false);
+    }
+  };
+  tick(true);
+  scanning = Promise.all([worker(), worker(), worker()]).then(async () => {
+    scanning = null; saveChCache(); tick(true);
+    if (state.mode !== "charge" || !state.charge || !state.cur || !total) return;
+    // Suche fertig: ohne eigene Auswahl die neueste Ladung zeigen, sonst nur die Vergleichskurven nachziehen
+    const newest = allCharges()[0];
+    if (!state.userPicked && newest && !(newest.name === state.charge.name && Math.abs(newest.x0 - state.charge.x0) < 1)) await openCharge(newest);
+    else { const v = state.view; select(state.cur, state.charge); state.view = v; drawAll(); }
+  });
+  return scanning;
+}
+function allCharges() {
+  const out = [];
+  for (const e of catalog.values()) for (const ch of e.charges || []) out.push(ch);
+  return out.sort((a, b) => (b.start || 0) - (a.start || 0));
+}
+function chargeLine(ch) {
+  return `${fmt(ch.soc0, 1)} → ${fmt(ch.soc1, 1)} % · ${fmt(ch.kwh, 1)} kWh · ${fmtDur(ch.dur)} · bis ${fmt(ch.pmax, ch.dc ? 0 : 1)} kW`;
+}
+function renderCharges() {
+  const box = $("#files"), list = allCharges();
+  box.innerHTML = "";
+  const months = new Map();
+  for (const ch of list) {
+    const k = Number.isFinite(ch.start) ? new Date(ch.start).toLocaleDateString("de-DE", { month: "long", year: "numeric" }) : "ohne Datum";
+    if (!months.has(k)) months.set(k, []);
+    months.get(k).push(ch);
+  }
+  for (const [k, chs] of months) {
+    const h = document.createElement("h3");
+    h.innerHTML = `<span></span><small></small>`;
+    h.querySelector("span").textContent = k;
+    h.querySelector("small").textContent = `· ${chs.length} ${chs.length === 1 ? "Ladung" : "Ladungen"} · ${fmt(chs.reduce((a, c) => a + c.kwh, 0), 0)} kWh`;
+    box.appendChild(h);
+    for (const ch of chs) {
+      const b = document.createElement("button");
+      b.className = "item"; b.type = "button";
+      b.setAttribute("aria-pressed", String(state.charge === ch));
+      b.innerHTML = "<b></b><i></i><span></span>";
+      b.querySelector("b").textContent = Number.isFinite(ch.start)
+        ? `${new Date(ch.start).toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "numeric" })} · ${clock(ch.start)} Uhr` : ch.name;
+      const i = b.querySelector("i");
+      i.textContent = ch.dc ? "DC" : "AC"; i.className = ch.dc ? "dc" : "ac";
+      b.querySelector("span").textContent = chargeLine(ch);
+      b.onclick = () => { state.userPicked = true; openCharge(ch); };
+      box.appendChild(b);
+    }
+  }
+  if (!list.length) box.innerHTML = `<h3>${state.scan ? "Suche Ladungen …" : "Keine Ladungen gefunden"}</h3>`;
+  // Summe oben
+  const sum = $("#chargeSum"), dc = list.filter((c) => c.dc);
+  let h = list.length
+    ? `<b>${fmt(list.length, 0)} ${list.length === 1 ? "Ladung" : "Ladungen"} · ${fmt(list.reduce((a, c) => a + c.kwh, 0), 0)} kWh</b><span>${dc.length} DC, ${list.length - dc.length} AC · in den Akku geladen</span>`
+    : `<b>Ladungen</b>`;
+  if (state.scan) h += `<span>Durchsuche Logs … ${state.scan.done} von ${state.scan.total}</span>`;
+  else if (!list.length) h += `<span>In den Logs ist keine Ladung zu sehen.</span>`;
+  sum.innerHTML = h;
+  sum.hidden = false;
+}
+async function openCharge(ch) {
+  const e = catalog.get(ch.name);
+  if (!e) return;
+  if (!e.log) {
+    $("#sub").textContent = `Lade ${ch.name} …`;
+    try { e.log = parseCSV(await e.load(), ch.name); }
+    catch (err) { $("#sub").textContent = `${ch.name}: ${err.message}`; $("#sub").classList.add("err"); return; }
+    $("#sub").classList.remove("err");
+    // Liste auf die frisch berechneten Werte umstellen (gleiche Ladung, neue Objekte)
+    const fresh = e.log.charges.find((c) => Math.abs(c.x0 - ch.x0) < 1) || e.log.charges[0];
+    setCharges(e); saveChCache();
+    if (fresh) ch = fresh;
+  } else {
+    ch = (e.log.charges || []).find((c) => Math.abs(c.x0 - ch.x0) < 1) || ch;
+  }
+  select(e.log, ch);
+}
+function renderChargeTiles(L, ch) {
+  let h = "";
+  const loss = Number.isFinite(ch.evseKwh) && ch.evseKwh > ch.kwh ? (1 - ch.kwh / ch.evseKwh) * 100 : NaN;
+  h += tile("Geladen", fmt(ch.kwh, 1), "kWh", Number.isFinite(ch.evseKwh) ? `in den Akku · Säule ${fmt(ch.evseKwh, 1)} kWh` : "in den Akku");
+  h += tile("Ladestand", `${fmt(ch.soc0, 1)} → ${fmt(ch.soc1, 1)}`, "%");
+  h += tile("Dauer", fmtDur(ch.dur), "");
+  h += tile("Spitzenleistung", fmt(ch.pmax, ch.dc ? 0 : 1), "kW", `im Schnitt ${fmt(ch.pavg, ch.dc ? 0 : 1)} kW`);
+  if (ch.fast) h += tile(`${ch.fast.from} → 80 %`, fmt(ch.fast.s / 60, 0), "min");
+  if (Number.isFinite(ch.evseMax) && ch.evseMax > 0) h += tile("Säule bietet", fmt(ch.evseMax, 0), "kW", "höchstens");
+  if (Number.isFinite(loss)) h += tile("Verlust", fmt(loss, 1), "%", `${fmt(ch.evseKwh - ch.kwh, 1)} kWh, z. B. für die Akkuheizung`);
+  if (Number.isFinite(ch.e1)) h += tile("Restenergie", `${fmt(ch.e0, 1)} → ${fmt(ch.e1, 1)}`, "kWh", "laut BMS");
+  h += tile("Akkutemperatur", `${fmt(ch.t0, 0)} → ${fmt(ch.t1, 0)}`, "°C", `kälteste Zelle, wärmste bis ${fmt(ch.tmax, 0)} °C`);
+  h += tile("Akkuheizung", ch.heatS >= 30 ? fmt(ch.heatS / 60, 0) : "aus", ch.heatS >= 30 ? "min" : "", ch.heatS >= 30 ? "an während des Ladens" : "");
+  if (Number.isFinite(ch.out)) h += tile("Außen", fmt(ch.out, 1), "°C");
+  if (Number.isFinite(ch.odo)) h += tile("Kilometerstand", fmt(ch.odo, 0), "km");
+  $("#tiles").innerHTML = h;
+  $("#tiles").hidden = false;
+}
+
+// Ladekurve: Leistung ueber Ladestand, dazu frueher geladene Kurven gleicher Art zum Vergleich
+function makeXY(L, ch) {
+  const el = document.createElement("section");
+  el.className = "chart xy";
+  el.innerHTML = `<div class="top"><h2><span>Ladekurve</span><em>kW über Ladestand %</em></h2><div class="legend"></div></div><canvas></canvas>`;
+  const i0 = L.x.findIndex((v) => v >= ch.x0), i1 = L.x.findIndex((v) => v >= ch.x1);
+  const pts = (key) => {
+    const out = [], v = L.cols[key], s = L.cols.soc_display_pct;
+    if (!v) return out;
+    for (let i = i0; i <= i1; i++) if (Number.isFinite(v[i]) && Number.isFinite(s[i]) && v[i] > 0) out.push([s[i], v[i]]);
+    return out;
+  };
+  const others = allCharges().filter((o) => o.dc === ch.dc && !(o.name === ch.name && Math.abs(o.x0 - ch.x0) < 1) && o.curve && o.curve.length > 3);
+  const series = [
+    { label: "diese Ladung (Akku)", color: "--s1", pts: pts("charge_kw"), w: 2 },
+    { label: "Säule", color: "--s2", pts: pts("evse_kw"), w: 1.5 },
+  ].filter((s) => s.pts.length);
+  const leg = el.querySelector(".legend");
+  series.forEach((s) => {
+    const span = document.createElement("span");
+    span.innerHTML = `<i></i><span></span><b></b>`;
+    span.querySelector("i").style.background = `var(${s.color})`;
+    span.querySelector("span").textContent = s.label;
+    leg.appendChild(span);
+    s.val = span.querySelector("b");
+  });
+  if (others.length) {
+    const span = document.createElement("span");
+    span.innerHTML = `<i style="background:var(--muted);opacity:.5"></i><span></span>`;
+    span.querySelector("span").textContent = `${others.length} frühere ${ch.dc ? "DC" : "AC"}-Ladungen`;
+    leg.appendChild(span);
+  }
+  const xy = { el, canvas: el.querySelector("canvas"), series, others, hover: null };
+  const cv = xy.canvas;
+  const move = (e) => {
+    const r = cv.getBoundingClientRect();
+    xy.hover = (e.clientX - r.left - PAD.l) / (r.width - PAD.l - PAD.r) * 100;
+    drawXY(xy);
+  };
+  cv.addEventListener("pointermove", move);
+  cv.addEventListener("pointerdown", move);
+  cv.addEventListener("pointerleave", (e) => { if (e.pointerType === "mouse") { xy.hover = null; drawXY(xy); } });
+  return xy;
+}
+function drawXY(xy) {
+  const cv = xy.canvas, W = cv.clientWidth, H = cv.clientHeight, dpr = window.devicePixelRatio || 1;
+  if (!W) return;
+  if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+  const g = cv.getContext("2d");
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, W, H);
+  const pw = W - PAD.l - PAD.r, ph = H - PAD.t - PAD.b;
+  let hi = 1;
+  for (const s of xy.series) for (const [, v] of s.pts) hi = Math.max(hi, v);
+  for (const o of xy.others) for (const [, v] of o.curve) hi = Math.max(hi, v);
+  const yStep = niceStep(hi, 4);
+  hi = Math.ceil(hi / yStep) * yStep;
+  const px = (x) => PAD.l + x / 100 * pw, py = (y) => PAD.t + (hi - y) / hi * ph;
+  const cGrid = cssVar("--grid"), cMuted = cssVar("--muted");
+  g.font = `11px ${cssVar("--font-mono")}`;
+  g.textBaseline = "middle"; g.textAlign = "right"; g.fillStyle = cMuted; g.lineWidth = 1;
+  for (let y = 0; y <= hi + yStep / 2; y += yStep) {
+    const yy = Math.round(py(y)) + 0.5;
+    g.strokeStyle = cGrid; g.beginPath(); g.moveTo(PAD.l, yy); g.lineTo(W - PAD.r, yy); g.stroke();
+    g.fillText(fmt(y, yStep < 1 ? 1 : 0), PAD.l - 6, yy);
+  }
+  g.textAlign = "center"; g.textBaseline = "alphabetic";
+  const xs = pw < 500 ? 20 : 10;
+  for (let x = 0; x <= 100; x += xs) {
+    const xx = Math.round(px(x)) + 0.5;
+    g.strokeStyle = cGrid; g.beginPath(); g.moveTo(xx, PAD.t); g.lineTo(xx, PAD.t + ph); g.stroke();
+    g.fillText(`${x} %`, Math.min(Math.max(xx, PAD.l + 14), W - PAD.r - 14), H - 5);
+  }
+  g.lineJoin = "round"; g.lineCap = "round";
+  g.strokeStyle = cMuted; g.globalAlpha = 0.35; g.lineWidth = 1.2;
+  for (const o of xy.others) {
+    g.beginPath();
+    o.curve.forEach(([x, y], k) => (k ? g.lineTo(px(x), py(y)) : g.moveTo(px(x), py(y))));
+    g.stroke();
+  }
+  g.globalAlpha = 1;
+  for (const s of xy.series.slice().reverse()) {
+    g.strokeStyle = cssVar(s.color); g.lineWidth = s.w;
+    g.beginPath();
+    s.pts.forEach(([x, y], k) => (k ? g.lineTo(px(x), py(y)) : g.moveTo(px(x), py(y))));
+    g.stroke();
+  }
+  // Fadenkreuz am naechsten Ladestand
+  const hv = xy.hover;
+  for (const s of xy.series) {
+    let best = null;
+    if (hv != null) for (const p of s.pts) if (!best || Math.abs(p[0] - hv) < Math.abs(best[0] - hv)) best = p;
+    if (best && Math.abs(best[0] - hv) <= 2) {
+      g.beginPath(); g.arc(px(best[0]), py(best[1]), 4.5, 0, 7); g.fillStyle = cssVar("--surface"); g.fill();
+      g.beginPath(); g.arc(px(best[0]), py(best[1]), 3, 0, 7); g.fillStyle = cssVar(s.color); g.fill();
+      s.val.textContent = `${fmt(best[1], 0)} kW bei ${fmt(best[0], 1)} %`;
+    } else s.val.textContent = `bis ${fmt(max(s.pts.map((p) => p[1])), 0)} kW`;
+  }
+  if (hv != null && hv >= 0 && hv <= 100) {
+    const xx = Math.round(px(hv)) + 0.5;
+    g.strokeStyle = cMuted; g.setLineDash([3, 3]); g.lineWidth = 1;
+    g.beginPath(); g.moveTo(xx, PAD.t); g.lineTo(xx, PAD.t + ph); g.stroke(); g.setLineDash([]);
+  }
 }
 
 // ---------- Oberfläche ----------
@@ -461,10 +789,15 @@ function nameTime(name) {
   return m ? new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime() : NaN;
 }
 const isSide = (name) => /^(diag|akku)_/.test(name);
-function addEntry(name, src, load) {
+function addEntry(name, src, load, key) {
   const e = catalog.get(name);
-  if (e) { if (!e.log && load) e.load = load; if (src === "device" || !e.src) e.src = src; return e; }
-  const n = { name, src, load, log: null, t: nameTime(name) };
+  if (e) {
+    if (!e.log && load) e.load = load;
+    if (src === "device" || !e.src) e.src = src;
+    if (key && key !== e.key) { e.key = key; if (!e.log) e.charges = null; }
+    return e;
+  }
+  const n = { name, src, load, key, log: null, t: nameTime(name) };
   catalog.set(name, n);
   return n;
 }
@@ -473,13 +806,14 @@ async function openLog(name) {
   if (!e) return;
   if (!e.log) {
     $("#sub").textContent = `Lade ${name} …`;
-    try { e.log = parseCSV(await e.load(), name); }
+    try { e.log = parseCSV(await e.load(), name); setCharges(e); }
     catch (err) { $("#sub").textContent = `${name}: ${err.message}`; $("#sub").classList.add("err"); return; }
     $("#sub").classList.remove("err");
   }
   select(e.log);
 }
 function renderFiles() {
+  if (state.mode === "charge") return renderCharges();
   const box = $("#files");
   const all = $("#all").checked;
   const list = [...catalog.values()].filter((e) => all || !isSide(e.name) || e.log === state.cur)
@@ -553,17 +887,25 @@ function renderTiles(L) {
   t.hidden = false;
 }
 
-function select(L) {
+function select(L, ch) {
   state.cur = L; state.view = null; state.hover = null;
-  renderFiles(); renderTiles(L);
+  state.charge = ch || null; state.base = ch ? [ch.x0, ch.x1 > ch.x0 ? ch.x1 : ch.x0 + 1] : null;
+  renderFiles();
+  if (ch) renderChargeTiles(L, ch); else renderTiles(L);
   const sub = $("#sub");
   const what = L.summary.charging ? "Ladevorgang" : L.kind === "drive" ? "Fahrt" : L.kind === "akku" ? "Schlafphase, Displayakku" : "Log";
   sub.textContent = Number.isFinite(L.t0) ? `${what} vom ${dateStr(L.t0)}, Start ${clock(L.t0)} Uhr` : `${what}, ohne Uhrzeit aufgezeichnet (Zeit ab Start)`;
   $("#hint").textContent = L.kind === "akku" ? "Ziehen zum Zoomen, Doppelklick zurück" : "Ziehen zum Zoomen, Doppelklick zurück";
-  $("#reset").textContent = L.kind === "akku" ? "Ganze Schlafphase" : L.summary.charging ? "Ganzer Ladevorgang" : "Ganze Fahrt";
+  $("#reset").textContent = L.kind === "akku" ? "Ganze Schlafphase" : ch || L.summary.charging ? "Ganzer Ladevorgang" : "Ganze Fahrt";
+  if (ch) {
+    const end = Number.isFinite(ch.start) ? ` bis ${clock(ch.start + ch.dur * 1000)} Uhr` : "";
+    sub.textContent = Number.isFinite(ch.start) ? `${ch.dc ? "DC" : "AC"}-Ladung vom ${dateStr(ch.start)}, ${clock(ch.start)}${end}` : `${ch.dc ? "DC" : "AC"}-Ladung aus ${ch.name}`;
+  }
   const box = $("#charts");
   box.innerHTML = "";
-  state.charts = specs(L).map((sp) => {
+  state.xy = ch ? makeXY(L, ch) : null;
+  if (state.xy) box.appendChild(state.xy.el);
+  state.charts = specs(L, ch).map((sp) => {
     const el = document.createElement("section");
     el.className = "chart";
     el.innerHTML = `<div class="top"><h2></h2><div class="legend"></div></div><canvas></canvas>`;
@@ -602,7 +944,7 @@ function timeStep(range, target) {
 }
 function viewRange() {
   const L = state.cur;
-  return state.view || [L.x[0], L.x[L.n - 1] > L.x[0] ? L.x[L.n - 1] : L.x[0] + 1];
+  return state.view || state.base || [L.x[0], L.x[L.n - 1] > L.x[0] ? L.x[L.n - 1] : L.x[0] + 1];
 }
 function nearest(x) {
   const X = state.cur.x;
@@ -740,6 +1082,7 @@ function drawAll() {
   const L = state.cur;
   if (!L) return;
   state.charts.forEach(drawChart);
+  if (state.xy) drawXY(state.xy);
   const [v0, v1] = viewRange();
   $("#reset").hidden = !state.view;
   let txt;
@@ -749,7 +1092,7 @@ function drawAll() {
     txt += L.xIsIndex ? `Zeile ${i + 1}` : `nach ${fmtDur(x)}`;
     if (L.cols.odometer_km && Number.isFinite(L.cols.odometer_km[i])) txt += ` · km ${fmt(L.cols.odometer_km[i], 0)}`;
   } else {
-    txt = L.xIsIndex ? `${L.n} Zeilen` : `${fmtDur(v1 - v0)} ${state.view ? "Ausschnitt" : "gesamt"}`;
+    txt = L.xIsIndex ? `${L.n} Zeilen` : `${fmtDur(v1 - v0)} ${state.view ? "Ausschnitt" : state.charge ? "Ladung" : "gesamt"}`;
   }
   $("#cursor").textContent = txt;
 }
@@ -782,7 +1125,8 @@ function bindCanvas(ch) {
     if (d && d.ch === ch && Math.abs(d.b - d.a) > 6) {
       const x2 = toX(e), a = Math.min(d.x, x2), b = Math.max(d.x, x2);
       const L = state.cur;
-      state.view = [Math.max(a, L.x[0]), Math.min(b, L.x[L.n - 1])];
+      const [b0, b1] = state.base || [L.x[0], L.x[L.n - 1]];
+      state.view = [Math.max(a, b0), Math.min(b, b1)];
       if (state.view[1] - state.view[0] < 2) state.view = null;
     }
     redraw();
@@ -800,7 +1144,7 @@ document.fonts && document.fonts.ready.then(redraw);
 // ---------- Dateien ----------
 function addLog(L, pick) {
   const e = addEntry(L.name, "file", null);
-  e.log = L;
+  e.log = L; e.charges = L.charges;
   if (pick) select(L); else renderFiles();
 }
 async function readFiles(list) {
@@ -809,7 +1153,10 @@ async function readFiles(list) {
     try { lastLog = parseCSV(await f.text(), f.name); addLog(lastLog, false); }
     catch (e) { errs.push(`${f.name}: ${e.message}`); }
   }
-  if (lastLog) select(lastLog);
+  if (lastLog) {
+    const chs = lastLog.charges;
+    if (state.mode === "charge" && chs.length) select(lastLog, chs[chs.length - 1]); else select(lastLog);
+  }
   if (errs.length) { const s = $("#sub"); s.textContent = `Nicht lesbar: ${errs.join(", ")}`; s.classList.add("err"); }
   else $("#sub").classList.remove("err");
 }
@@ -858,7 +1205,7 @@ async function loadGithub() {
   try {
     const items = await gh(LOG_DIR, false);
     const csv = items.filter((i) => i.type === "file" && /\.csv$/i.test(i.name));
-    csv.forEach((i) => addEntry(i.name, "github", () => gh(i.path, true)));
+    csv.forEach((i) => addEntry(i.name, "github", () => gh(i.path, true), `gh:${i.sha}`));
     st.textContent = `${csv.length} Logs auf GitHub gefunden.`;
   } catch (e) { st.textContent = e.message; $("#ghbox").open = true; }
 }
@@ -869,11 +1216,11 @@ $("#saveToken").onclick = async () => {
 };
 
 async function loadAll() {
-  for (const f of await deviceLogs()) addEntry(f.name, "device", async () => f.text);
+  for (const f of await deviceLogs()) addEntry(f.name, "device", async () => f.text, `dev:${(f.text || "").length}`);
   await loadGithub();
   renderFiles();
 }
-$("#reload").onclick = loadAll;
+$("#reload").onclick = async () => { await loadAll(); if (state.mode === "charge") scanCharges(); };
 
 // Die neuesten Fahrten im Hintergrund auswerten, damit die Liste Strecke und
 // Verbrauch zeigt und nicht ein Kurz-Log von wenigen Sekunden vorne steht
@@ -884,8 +1231,36 @@ async function prefetch(n) {
     renderFiles();
   }
 }
+// Ansicht "Logs" (alle Fahrten) oder "Laden" (nur Ladevorgaenge), umschaltbar ueber #laden
+function setMode() {
+  state.mode = location.hash === "#laden" ? "charge" : "logs";
+  const ch = state.mode === "charge";
+  $("#navLogs").toggleAttribute("aria-current", !ch); if (!ch) $("#navLogs").setAttribute("aria-current", "page");
+  $("#navCharge").toggleAttribute("aria-current", ch); if (ch) $("#navCharge").setAttribute("aria-current", "page");
+  $("#allBox").hidden = ch; $("#chargeSum").hidden = !ch;
+  document.querySelector("h1").textContent = ch ? "Ioniq 6 Laden" : "Ioniq 6 Logs";
+  document.title = ch ? "Ioniq 6 Laden" : "Ioniq 6 Logs";
+}
+async function startCharge() {
+  renderFiles();
+  const pick = async () => {
+    const n = allCharges()[0];
+    if (n && !state.charge && !state.opening && state.mode === "charge") { state.opening = true; try { await openCharge(n); } finally { state.opening = false; } }
+  };
+  await pick();
+  await scanCharges();
+  await pick();
+  if (!allCharges().length && state.mode === "charge") { $("#sub").textContent = "Keine Ladung in den Logs gefunden"; }
+}
+window.addEventListener("hashchange", () => {
+  setMode();
+  if (state.mode === "charge") { state.charge = null; startCharge(); }
+  else if (state.cur) select(state.cur); else renderFiles();
+});
+setMode();
 (async () => {
   await loadAll();
+  if (state.mode === "charge") { await startCharge(); return; }
   const want = new URLSearchParams(location.search).get("f");
   if (want && catalog.get(want)) { await openLog(want); prefetch(15); return; }
   $("#sub").textContent = "Lade die letzten Fahrten …";

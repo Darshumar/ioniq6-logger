@@ -9,6 +9,11 @@ https://darshumar.github.io/ioniq6-logger/
 - **Logs** (`logs.html`): zeigt Fahrten als Diagramme: Aufzeichnungen dieses Geräts, geöffnete CSV-Dateien
   und die ESP-Logs aus dem privaten Repo `Darshumar/Ioniq6_obd` (`logs/esp32`). Dafür braucht die App einen
   Fine-grained Token mit „Contents: Read-only“ nur für dieses Repo; er wird nur im Browser gespeichert.
+- **Laden** (`logs.html#laden`): nur die Ladevorgänge aus allen Logs (Zustand 3 = Laden, bei alten Logs ohne
+  diese Spalte: Akku nimmt Leistung auf und der Motor steht). Je Ladung: AC/DC, Ladestand von–bis, kWh in den Akku
+  und von der Säule, Spitzen- und Mittelleistung, Dauer, Zeit 10 (20) → 80 %, Akkutemperatur und -heizung, dazu
+  die Ladekurve (kW über Ladestand) mit früheren Ladungen gleicher Art zum Vergleich. Die Liste wird einmal aus
+  allen Logs gesucht und auf dem Gerät gemerkt; danach lädt die App nur neue oder geänderte Logs nach.
 
 Installieren unter Windows: Seite in Edge öffnen → Menü „…“ → Apps → „Diese Website als App installieren“
 (in Chrome: Symbol rechts in der Adressleiste). Danach startet „Ioniq 6“ aus dem Startmenü im eigenen Fenster.
