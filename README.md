@@ -7,7 +7,7 @@ https://darshumar.github.io/ioniq6-logger/
   zeigt Akku- und Fahrdaten live und zeichnet sie als CSV auf (gleiches Format wie die Logs des
   ESP32-Displays). Aufzeichnungen bleiben auf dem Gerät (IndexedDB).
 - **Logs** (`logs.html`): zeigt Fahrten als Diagramme: Aufzeichnungen dieses Geräts, geöffnete CSV-Dateien
-  und die ESP-Logs aus dem privaten Repo `Darshumar/Ioniq6_obd` (`logs/esp32`). Dafür braucht die App einen
+  und die ESP-Logs aus dem privaten Repo `Darshumar/Ioniq6-logs` (`logs/esp32`, bis 18.11.2026 in `Ioniq6_obd`). Dafür braucht die App einen
   Fine-grained Token mit „Contents: Read-only“ nur für dieses Repo; er wird nur im Browser gespeichert.
 - **Laden** (`logs.html#laden`): nur die Ladevorgänge aus allen Logs (Zustand 3 = Laden, bei alten Logs ohne
   diese Spalte: Akku nimmt Leistung auf und der Motor steht). Je Ladung: AC/DC, Ladestand von–bis, kWh in den Akku
